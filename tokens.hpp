@@ -30,10 +30,10 @@ enum class Code {
     Range,
     Dot,
     Comma,
-    Int,
-    Real,
-    Boolean,
-    String,
+    IntLiteral,
+    RealLiteral,
+    BooleanLiteral,
+    StringLiteral,
     Less,
     LessEqual,
     Greater,
@@ -73,7 +73,7 @@ struct Identifier : Token {
 };
 
 struct IntegerLiteral : Literal {
-    long value;
+    long long value;
 };
 
 struct RealLiteral : Literal {
