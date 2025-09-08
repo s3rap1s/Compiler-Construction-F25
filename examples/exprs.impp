@@ -1,0 +1,25 @@
+routine main() is
+    var a: integer is 10
+    var b: integer is 3
+    var c: real is 5.5
+    var d: boolean is true
+    var e: boolean is false
+
+    var expr1: integer is a + b * 2
+    var expr2: real is (a - c) / b
+    var expr3: boolean is d and not e
+    var expr4: boolean is a > b or c <= 6.0
+    var expr5: integer is a % b + 1
+    var expr6: boolean is (a = 10) xor (b /= 3)
+    var expr7: real is -c + 2.0 * a
+    var expr8: boolean is a >= 5 and b < 4 or e
+
+    print expr1
+    print expr2
+    print expr3
+    print expr4
+    print expr5
+    print expr6
+    print expr7
+    print expr8
+end

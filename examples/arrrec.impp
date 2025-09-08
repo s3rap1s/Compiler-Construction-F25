@@ -1,0 +1,23 @@
+type Point is record
+    var x: integer
+    var y: integer
+end
+
+type Points is array[2] Point
+
+type Container is record
+    var points: Points
+end
+
+routine main() is
+    var c: Container
+    c.points[1].x := 1
+    c.points[1].y := 2
+    c.points[2].x := 3
+    c.points[2].y := 4
+    
+    print c.points[1].x
+    print c.points[1].y
+    print c.points[2].x
+    print c.points[2].y
+end

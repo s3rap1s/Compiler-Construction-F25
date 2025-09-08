@@ -1,5 +1,6 @@
 #include "tokens.hpp"
 
+#include <concepts>
 #include <cstddef>
 #include <memory>
 #include <utility>
@@ -15,14 +16,20 @@ class Lexer {
         Punctuation
     };
 
-    State currentState = State::Start;
-    std::size_t line_no = 0;
+    State current_state = State::Start;
+    std::size_t line_no = 1;
     std::size_t char_pos = 0;
     std::string file;
 
     [[nodiscard]] Span getCurrentSpan(std::size_t token_start) const;
 
-    [[nodiscard]] std::shared_ptr<Token> makeBasicToken(TokenCode code, std::size_t token_start) const;
+    template <std::derived_from<Token> T = Token>
+    [[nodiscard]] std::shared_ptr<T> makeToken(TokenCode code, std::size_t token_start) const {
+        auto token = std::make_shared_for_overwrite<T>();
+        token->span = getCurrentSpan(token_start);
+        token->code = code;
+        return token;
+    }
 
   public:
     explicit Lexer(std::string file) : file{std::move(file)} {}

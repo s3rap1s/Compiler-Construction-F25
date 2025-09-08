@@ -91,13 +91,6 @@ std::optional<TokenCode> findPunctuation(std::string_view token) {
     return Span{.line_no = line_no, .begin = token_start, .end = char_pos};
 }
 
-[[nodiscard]] std::shared_ptr<Token> Lexer::makeBasicToken(TokenCode code, std::size_t token_start) const {
-    auto token = std::make_shared_for_overwrite<Token>();
-    token->span = getCurrentSpan(token_start);
-    token->code = code;
-    return token;
-}
-
 std::shared_ptr<Token> Lexer::getNextToken() {
     // NOLINTBEGIN(*bool-conversion*)
     if (char_pos == file.size())
@@ -106,23 +99,23 @@ std::shared_ptr<Token> Lexer::getNextToken() {
     std::string buffer;
 
     while (true) {
-        char cur_char = char_pos == file.size() ? '\n' : file[char_pos++];
-        if (cur_char == '\n' || cur_char == '\r')
-            line_no++;
-        switch (currentState) {
+        if (char_pos > file.size())
+            return nullptr;
+        char cur_char = char_pos == file.size() ? '\n' : file[char_pos];
+        switch (current_state) {
         case State::Start:
             token_start = char_pos;
             if (std::isalpha(cur_char)) {
-                currentState = State::KeywordOrIdentifier;
+                current_state = State::KeywordOrIdentifier;
                 buffer += cur_char;
             } else if (std::isdigit(cur_char)) {
-                currentState = State::IntegerLiteral;
+                current_state = State::IntegerLiteral;
                 buffer += cur_char;
             } else if (cur_char == '"') {
-                currentState = State::StringLiteral;
+                current_state = State::StringLiteral;
             } else if (std::isspace(cur_char)) {
             } else {
-                currentState = State::Punctuation;
+                current_state = State::Punctuation;
                 buffer += cur_char;
             }
             break;
@@ -130,15 +123,13 @@ std::shared_ptr<Token> Lexer::getNextToken() {
             if (std::isalpha(cur_char)) {
                 buffer += cur_char;
             } else if (std::isdigit(cur_char)) {
-                currentState = State::Identifier;
+                current_state = State::Identifier;
                 buffer += cur_char;
             } else {
-                currentState = State::Start;
+                current_state = State::Start;
                 if (auto token_code = findKeyword(buffer))
-                    return makeBasicToken(*token_code, token_start);
-                auto token = std::make_shared_for_overwrite<Identifier>();
-                token->span = getCurrentSpan(token_start);
-                token->code = TokenCode::Identifier;
+                    return makeToken(*token_code, token_start);
+                auto token = makeToken<Identifier>(TokenCode::Identifier, token_start);
                 token->name = std::move(buffer);
                 return token;
             }
@@ -147,21 +138,26 @@ std::shared_ptr<Token> Lexer::getNextToken() {
             if (std::isalnum(cur_char)) {
                 buffer += cur_char;
             } else {
-                currentState = State::Start;
-                return std::make_shared<Identifier>(buffer);
+                current_state = State::Start;
+                auto token = makeToken<Identifier>(TokenCode::Identifier, token_start);
+                token->name = std::move(buffer);
+                return token;
             }
             break;
         case State::IntegerLiteral:
             if (std::isdigit(cur_char)) {
                 buffer += cur_char;
             } else if (cur_char == '.') {
-                currentState = State::RealLiteral;
+                current_state = State::RealLiteral;
                 buffer += cur_char;
             } else {
-                currentState = State::Start;
+                current_state = State::Start;
                 long long value = 0;
-                if (std::from_chars(buffer.data(), buffer.data() + buffer.size(), value).ec == std::errc{})
-                    return std::make_shared<IntegerLiteral>(value);
+                if (std::from_chars(buffer.data(), buffer.data() + buffer.size(), value).ec == std::errc{}) {
+                    auto token = makeToken<IntegerLiteral>(TokenCode::IntegerLiteral, token_start);
+                    token->value = value;
+                    return token;
+                }
                 throw std::runtime_error{std::format("Wrong integer literal: {}", buffer)};
             }
             break;
@@ -169,30 +165,46 @@ std::shared_ptr<Token> Lexer::getNextToken() {
             if (std::isdigit(cur_char)) {
                 buffer += cur_char;
             } else {
-                currentState = State::Start;
+                current_state = State::Start;
+                if (buffer.back() == '.') {
+                    --char_pos;
+                    buffer.pop_back();
+                }
                 double value = 0;
-                if (std::from_chars(buffer.data(), buffer.data() + buffer.size(), value).ec == std::errc{})
-                    return std::make_shared<RealLiteral>(value);
+                if (std::from_chars(buffer.data(), buffer.data() + buffer.size(), value).ec == std::errc{}) {
+                    auto token = makeToken<RealLiteral>(TokenCode::RealLiteral, token_start);
+                    token->value = value;
+                    return token;
+                }
                 throw std::runtime_error{std::format("Wrong real literal: {}", buffer)};
             }
             break;
         case State::Punctuation:
             if (std::isalnum(cur_char) || std::isspace(cur_char)) {
-                if (auto token_code = findPunctuation(buffer))
-                    return makeBasicToken(*token_code, token_start);
+                current_state = State::Start;
+                for (std::size_t size = buffer.size(); size > 0; --size, --char_pos) {
+                    if (auto token_code = findPunctuation({buffer.data(), buffer.data() + size})) {
+                        return makeToken(*token_code, token_start);
+                    }
+                }
                 throw std::runtime_error{std::format("Unknown token: {}", buffer)};
             } else {
                 buffer += cur_char;
             }
             break;
         case State::StringLiteral:
-            if (cur_char == '"')
-                return std::make_shared<StringLiteral>(buffer);
+            if (cur_char == '"') {
+                auto token = makeToken<StringLiteral>(TokenCode::StringLiteral, token_start);
+                token->value = std::move(buffer);
+                current_state = State::Start;
+                return token;
+            }
             buffer += cur_char;
             break;
-        default:
-            break;
         }
+        if (cur_char == '\n' || cur_char == '\r')
+            line_no++;
+        ++char_pos;
     }
     // NOLINTEND(*bool-conversion*)
 }

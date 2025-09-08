@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include <cstddef>
 #include <print>
 #include <string>
@@ -28,7 +29,7 @@ enum class TokenCode : char {
     If,
     In,
     Integer,
-    IntLiteral,
+    IntegerLiteral,
     Is,
     Less,
     LessEqual,
@@ -59,6 +60,61 @@ enum class TokenCode : char {
     Xor,
 };
 
+constexpr std::array tokenRepresentations = {
+    "and",
+    "array",
+    "=>",
+    ":=",
+    "begin",
+    "boolean",
+    "booleanliteral",
+    "]",
+    ")",
+    ":",
+    ",",
+    "/",
+    ".",
+    "else",
+    "end",
+    "=",
+    "for",
+    ">",
+    ">=",
+    "identifier",
+    "if",
+    "in",
+    "integer",
+    "integerliteral",
+    "is",
+    "<",
+    "<=",
+    "loop",
+    "-",
+    "%",
+    "*",
+    "not",
+    "/=",
+    "[",
+    "(",
+    "or",
+    "+",
+    "print",
+    "..",
+    "real",
+    "realliteral",
+    "record",
+    "return",
+    "reverse",
+    "routine",
+    ";",
+    "stringliteral",
+    "then",
+    "type",
+    "var",
+    "while",
+    "xor",
+};
+
 struct Span {
     std::size_t line_no;
     std::size_t begin;
@@ -72,13 +128,15 @@ struct Token { // NOLINT(*special-member*)
     virtual ~Token() = default;
 
     virtual void print() const {
-        std::println("Token {} on {}, [{},{})", static_cast<int>(code), span.line_no, span.begin, span.end);
+        std::println("Token {} on line {}, [{},{})",
+                     tokenRepresentations[static_cast<std::size_t>(code)],
+                     span.line_no,
+                     span.begin,
+                     span.end);
     }
 };
 
-struct Literal : Token { // NOLINT(*special-member*)
-    ~Literal() override = 0;
-};
+struct Literal : Token {};
 
 struct Identifier : Token {
     std::string name;
