@@ -2,6 +2,7 @@
 
 #include <array>
 #include <cstddef>
+#include <format>
 #include <print>
 #include <string>
 
@@ -127,58 +128,53 @@ struct Token { // NOLINT(*special-member*)
 
     virtual ~Token() = default;
 
-    virtual void print() const {
-        std::println("Token {} on line {}, [{},{})",
-                     tokenRepresentations[static_cast<std::size_t>(code)],
-                     span.line_no,
-                     span.begin,
-                     span.end);
+    [[nodiscard]] virtual std::string getRepr() const {
+        return std::format("<{}>", tokenRepresentations[static_cast<std::size_t>(code)]);
+    }
+
+    void print() const {
+        std::println("Token {} on line {}, [{},{})", getRepr(), span.line_no, span.begin, span.end);
+    }
+};
+
+struct Identifier : Token {
+    std::string name;
+
+    [[nodiscard]] std::string getRepr() const override {
+        return std::format("identifier \"{}\"", name);
     }
 };
 
 struct Literal : Token {};
 
-struct Identifier : Token {
-    std::string name;
-
-    void print() const override {
-        std::print("Identifier {} ", name);
-        Token::print();
-    }
-};
-
 struct IntegerLiteral : Literal {
     long long value = 0;
 
-    void print() const override {
-        std::print("Literal {} ", value);
-        Token::print();
+    [[nodiscard]] std::string getRepr() const override {
+        return std::format("literal {}", value);
     }
 };
 
 struct RealLiteral : Literal {
     double value = 0;
 
-    void print() const override {
-        std::print("Literal {} ", value);
-        Token::print();
+    [[nodiscard]] std::string getRepr() const override {
+        return std::format("literal {}", value);
     }
 };
 
 struct BooleanLiteral : Literal {
     bool value = false;
 
-    void print() const override {
-        std::print("Literal {} ", value);
-        Token::print();
+    [[nodiscard]] std::string getRepr() const override {
+        return std::format("literal {}", value);
     }
 };
 
 struct StringLiteral : Literal {
     std::string value;
 
-    void print() const override {
-        std::print("Literal \"{}\" ", value);
-        Token::print();
+    [[nodiscard]] std::string getRepr() const override {
+        return std::format("literal \"{}\"", value);
     }
 };
