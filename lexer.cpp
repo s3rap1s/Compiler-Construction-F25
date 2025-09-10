@@ -194,9 +194,11 @@ std::shared_ptr<Token> Lexer::getNextToken() {
             break;
         case State::StringLiteral:
             if (cur_char == '"') {
+                current_state = State::Start;
+                ++char_pos;
+
                 auto token = makeToken<StringLiteral>(TokenCode::StringLiteral, token_start);
                 token->value = std::move(buffer);
-                current_state = State::Start;
                 return token;
             }
             buffer += cur_char;
