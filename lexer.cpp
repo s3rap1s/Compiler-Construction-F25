@@ -22,6 +22,7 @@ std::unordered_map<std::string_view, TokenCode> getKeywordMap() {
     map["boolean"] = TokenCode::Boolean;
     map["else"] = TokenCode::Else;
     map["end"] = TokenCode::End;
+    map["false"] = TokenCode::False;
     map["for"] = TokenCode::For;
     map["if"] = TokenCode::If;
     map["in"] = TokenCode::In;
@@ -37,6 +38,7 @@ std::unordered_map<std::string_view, TokenCode> getKeywordMap() {
     map["reverse"] = TokenCode::Reverse;
     map["routine"] = TokenCode::Routine;
     map["then"] = TokenCode::Then;
+    map["true"] = TokenCode::True;
     map["type"] = TokenCode::Type;
     map["var"] = TokenCode::Var;
     map["while"] = TokenCode::While;
@@ -127,8 +129,14 @@ std::shared_ptr<Token> Lexer::getNextToken() {
                 buffer += cur_char;
             } else {
                 current_state = State::Start;
-                if (auto token_code = findKeyword(buffer))
+                if (auto token_code = findKeyword(buffer)) {
+                    if (*token_code == TokenCode::True || *token_code == TokenCode::False) {
+                        auto token = makeToken<BooleanLiteral>(*token_code, token_start);
+                        token->value = *token_code == TokenCode::True;
+                        return token;
+                    }
                     return makeToken(*token_code, token_start);
+                }
                 auto token = makeToken<Identifier>(TokenCode::Identifier, token_start);
                 token->name = std::move(buffer);
                 return token;

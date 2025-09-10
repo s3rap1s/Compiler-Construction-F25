@@ -23,6 +23,7 @@ enum class TokenCode : char {
     Else,
     End,
     Equal,
+    False,
     For,
     Greater,
     GreaterEqual,
@@ -55,66 +56,73 @@ enum class TokenCode : char {
     Semicolon,
     StringLiteral,
     Then,
+    True,
     Type,
     Var,
     While,
     Xor,
 };
 
-constexpr std::array tokenRepresentations = {
-    "and",
-    "array",
-    "=>",
-    ":=",
-    "begin",
-    "boolean",
-    "booleanliteral",
-    "]",
-    ")",
-    ":",
-    ",",
-    "/",
-    ".",
-    "else",
-    "end",
-    "=",
-    "for",
-    ">",
-    ">=",
-    "identifier",
-    "if",
-    "in",
-    "integer",
-    "integerliteral",
-    "is",
-    "<",
-    "<=",
-    "loop",
-    "-",
-    "%",
-    "*",
-    "not",
-    "/=",
-    "[",
-    "(",
-    "or",
-    "+",
-    "print",
-    "..",
-    "real",
-    "realliteral",
-    "record",
-    "return",
-    "reverse",
-    "routine",
-    ";",
-    "stringliteral",
-    "then",
-    "type",
-    "var",
-    "while",
-    "xor",
-};
+constexpr auto tokenRepresentations = []{
+    auto toSizeT = [](TokenCode c) { return static_cast<std::size_t>(c); };
+    constexpr std::size_t kSize = toSizeT(TokenCode::Xor) + 1;
+    std::array<const char*, kSize> map{};
+    map[toSizeT(TokenCode::And)] = "and";
+    map[toSizeT(TokenCode::Array)] = "array";
+    map[toSizeT(TokenCode::Arrow)] = "=>";
+    map[toSizeT(TokenCode::Assignment)] = ":=";
+    map[toSizeT(TokenCode::Begin)] = "begin";
+    map[toSizeT(TokenCode::Boolean)] = "boolean";
+    map[toSizeT(TokenCode::BooleanLiteral)] = "booleanliteral";
+    map[toSizeT(TokenCode::ClosedBracket)] = "]";
+    map[toSizeT(TokenCode::ClosedParenthesis)] = ")";
+    map[toSizeT(TokenCode::Colon)] = ":";
+    map[toSizeT(TokenCode::Comma)] = ",";
+    map[toSizeT(TokenCode::Divide)] = "/";
+    map[toSizeT(TokenCode::Dot)] = ".";
+    map[toSizeT(TokenCode::Else)] = "else";
+    map[toSizeT(TokenCode::End)] = "end";
+    map[toSizeT(TokenCode::Equal)] = "=";
+    map[toSizeT(TokenCode::False)] = "false";
+    map[toSizeT(TokenCode::For)] = "for";
+    map[toSizeT(TokenCode::Greater)] = ">";
+    map[toSizeT(TokenCode::GreaterEqual)] = ">=";
+    map[toSizeT(TokenCode::Identifier)] = "identifier";
+    map[toSizeT(TokenCode::If)] = "if";
+    map[toSizeT(TokenCode::In)] = "in";
+    map[toSizeT(TokenCode::Integer)] = "integer";
+    map[toSizeT(TokenCode::IntegerLiteral)] = "integerliteral";
+    map[toSizeT(TokenCode::Is)] = "is";
+    map[toSizeT(TokenCode::Less)] = "<";
+    map[toSizeT(TokenCode::LessEqual)] = "<=";
+    map[toSizeT(TokenCode::Loop)] = "loop";
+    map[toSizeT(TokenCode::Minus)] = "-";
+    map[toSizeT(TokenCode::Modulo)] = "%";
+    map[toSizeT(TokenCode::Multiply)] = "*";
+    map[toSizeT(TokenCode::Not)] = "not";
+    map[toSizeT(TokenCode::NotEqual)] = "/=";
+    map[toSizeT(TokenCode::OpenBracket)] = "[";
+    map[toSizeT(TokenCode::OpenParenthesis)] = "(";
+    map[toSizeT(TokenCode::Or)] = "or";
+    map[toSizeT(TokenCode::Plus)] = "+";
+    map[toSizeT(TokenCode::Print)] = "print";
+    map[toSizeT(TokenCode::Range)] = "..";
+    map[toSizeT(TokenCode::Real)] = "real";
+    map[toSizeT(TokenCode::RealLiteral)] = "realliteral";
+    map[toSizeT(TokenCode::Record)] = "record";
+    map[toSizeT(TokenCode::Return)] = "return";
+    map[toSizeT(TokenCode::Reverse)] = "reverse";
+    map[toSizeT(TokenCode::Routine)] = "routine";
+    map[toSizeT(TokenCode::Semicolon)] = ";";
+    map[toSizeT(TokenCode::StringLiteral)] = "stringliteral";
+    map[toSizeT(TokenCode::Then)] = "then";
+    map[toSizeT(TokenCode::True)] = "true";
+    map[toSizeT(TokenCode::Type)] = "type";
+    map[toSizeT(TokenCode::Var)] = "var";
+    map[toSizeT(TokenCode::While)] = "while";
+    map[toSizeT(TokenCode::Xor)] = "xor";
+    return map;
+}();
 
 struct Span {
     std::size_t line_no;
