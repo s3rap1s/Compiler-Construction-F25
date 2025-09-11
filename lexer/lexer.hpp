@@ -1,8 +1,11 @@
+#pragma once
+
+#include "lexing_error.hpp"
 #include "tokens.hpp"
 
-#include <concepts>
 #include <cstddef>
-#include <memory>
+#include <expected>
+#include <optional>
 #include <utility>
 
 class Lexer {
@@ -23,16 +26,10 @@ class Lexer {
 
     [[nodiscard]] Span getCurrentSpan(std::size_t token_start) const;
 
-    template <std::derived_from<Token> T = Token>
-    [[nodiscard]] std::shared_ptr<T> makeToken(TokenCode code, std::size_t token_start) const {
-        auto token = std::make_shared_for_overwrite<T>();
-        token->span = getCurrentSpan(token_start);
-        token->code = code;
-        return token;
-    }
+    [[nodiscard]] Token makeToken(std::size_t token_start, Token::Payload payload) const;
 
   public:
     explicit Lexer(std::string file) : file{std::move(file)} {}
 
-    std::shared_ptr<Token> getNextToken();
+    std::expected<std::optional<Token>, LexingError> getNextToken();
 };

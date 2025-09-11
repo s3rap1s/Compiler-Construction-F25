@@ -19,8 +19,10 @@ add_compile_options(-Wall -Wextra)
 
 # main program
 add_executable(main
-    lexer.cpp
-    main.cpp)
+    lexer/lexer.cpp
+    lexer/token_printer.cpp
+    main.cpp
+)
 
 # setup
 target_include_directories(main PRIVATE
