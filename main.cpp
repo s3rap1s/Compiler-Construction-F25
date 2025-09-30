@@ -11,7 +11,7 @@
 
 int main(int argc, const char** argv) {
     if (argc < 2) {
-        std::println(stderr, "Specify a file to analyze\n");
+        std::println(stderr, "Specify a file to analyze");
         return EXIT_FAILURE;
     }
 
