@@ -12,6 +12,8 @@
 #include "lexer/token_printer.hpp"
 #include "utils.hpp"
 
+using namespace lexer;
+
 namespace {
 
 void handleLexingError(const LexingError& error) {
