@@ -5,6 +5,8 @@
 #include <utility>
 #include <variant>
 
+namespace lexer {
+
 struct Identifier {
     std::string name;
 };
@@ -99,3 +101,5 @@ struct Token {
 
     Token(Span span, Payload payload) : span{span}, payload{std::move(payload)} {}
 };
+
+} // namespace lexer

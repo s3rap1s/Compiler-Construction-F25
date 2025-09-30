@@ -13,6 +13,8 @@
 #include <unordered_map>
 #include <utility>
 
+namespace lexer {
+
 namespace {
 
 const std::unordered_map<std::string_view, SyntaxPart::Type> kKeywordMap = [] { // NOLINT(cert-err58-cpp)
@@ -203,3 +205,5 @@ std::expected<std::optional<Token>, LexingError> Lexer::getNextToken() {
     }
     // NOLINTEND(*bool-conversion*)
 }
+
+} // namespace lexer

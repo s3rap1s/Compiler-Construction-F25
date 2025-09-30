@@ -3,6 +3,8 @@
 #include <string>
 #include <variant>
 
+namespace lexer {
+
 struct IntegerLiteralError {
     std::string literal;
 };
@@ -16,3 +18,5 @@ struct UnknownToken {
 };
 
 using LexingError = std::variant<IntegerLiteralError, RealLiteralError, UnknownToken>;
+
+} // namespace lexer 

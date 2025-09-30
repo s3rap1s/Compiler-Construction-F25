@@ -8,6 +8,8 @@
 #include <optional>
 #include <utility>
 
+namespace lexer {
+
 class Lexer {
     enum class State : char {
         Start,
@@ -33,3 +35,5 @@ class Lexer {
 
     std::expected<std::optional<Token>, LexingError> getNextToken();
 };
+
+} // namespace lexer

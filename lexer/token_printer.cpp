@@ -7,6 +7,8 @@
 #include <string>
 #include <variant>
 
+namespace lexer {
+
 namespace {
 
 constexpr auto kSyntaxPartSpellings = [] {
@@ -130,3 +132,5 @@ void TokenPrinter::print(const Token& token) {
     std::string repr = std::visit(matcher, payload);
     std::println("Token {} on line {}, [{}, {})", repr, span.line_no, span.begin, span.end);
 }
+
+} // namespace lexer
