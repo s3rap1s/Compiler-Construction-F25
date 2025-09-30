@@ -60,6 +60,7 @@ struct SyntaxPart {
         Minus,
         Modulo,
         Multiply,
+        NewLine,
         Not,
         NotEqual,
         OpenBracket,

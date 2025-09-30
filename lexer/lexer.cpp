@@ -195,8 +195,11 @@ std::expected<std::optional<Token>, LexingError> Lexer::getNextToken() {
             buffer += cur_char;
             break;
         }
-        if (cur_char == '\n' || cur_char == '\r')
-            line_no++;
+        if (cur_char == '\n' || cur_char == '\r'){
+            ++line_no;
+            ++char_pos;
+            return makeToken(token_start, SyntaxPart{SyntaxPart::Type::NewLine});
+        }
         ++char_pos;
     }
     // NOLINTEND(*bool-conversion*)

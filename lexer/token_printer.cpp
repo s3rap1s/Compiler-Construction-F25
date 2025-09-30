@@ -37,12 +37,13 @@ constexpr auto kSyntaxPartSpellings = [] {
     map[toSizeT(Type::In)] = "in";
     map[toSizeT(Type::Integer)] = "integer";
     map[toSizeT(Type::Is)] = "is";
-    map[toSizeT(Type::Less)] = "<";
+    map[toSizeT(Type::Less)] = "<"; 
     map[toSizeT(Type::LessEqual)] = "<=";
     map[toSizeT(Type::Loop)] = "loop";
     map[toSizeT(Type::Minus)] = "-";
     map[toSizeT(Type::Modulo)] = "%";
     map[toSizeT(Type::Multiply)] = "*";
+    map[toSizeT(Type::NewLine)] = "\\n";
     map[toSizeT(Type::Not)] = "not";
     map[toSizeT(Type::NotEqual)] = "/=";
     map[toSizeT(Type::OpenBracket)] = "[";
