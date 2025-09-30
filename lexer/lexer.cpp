@@ -155,7 +155,7 @@ std::expected<std::optional<Token>, LexingError> Lexer::getNextToken() {
                 if (long long value = 0;
                     std::from_chars(buffer.data(), buffer.data() + buffer.size(), value).ec == std::errc{})
                     return makeToken(token_start, IntegerLiteral{value});
-                throw std::runtime_error{std::format("Wrong integer literal: {}", buffer)};
+                return std::unexpected{IntegerLiteralError{buffer}};
             }
             break;
         case State::RealLiteral:
@@ -171,17 +171,16 @@ std::expected<std::optional<Token>, LexingError> Lexer::getNextToken() {
             if (double value = 0;
                 std::from_chars(buffer.data(), buffer.data() + buffer.size(), value).ec == std::errc{})
                 return makeToken(token_start, RealLiteral{value});
-            throw std::runtime_error{std::format("Wrong real literal: {}", buffer)};
+            return std::unexpected{RealLiteralError{buffer}};
             break;
         case State::Punctuation:
             if (std::isalnum(cur_char) || std::isspace(cur_char)) {
                 current_state = State::Start;
                 for (std::size_t size = buffer.size(); size > 0; --size, --char_pos) {
-                    if (auto token_type = findPunctuation({buffer.data(), buffer.data() + size})) {
+                    if (auto token_type = findPunctuation({buffer.data(), buffer.data() + size}))
                         return makeToken(token_start, SyntaxPart{*token_type});
-                    }
                 }
-                throw std::runtime_error{std::format("Unknown token: {}", buffer)};
+                return std::unexpected{UnknownToken{buffer}};
             } else {
                 buffer += cur_char;
             }
@@ -195,7 +194,7 @@ std::expected<std::optional<Token>, LexingError> Lexer::getNextToken() {
             buffer += cur_char;
             break;
         }
-        if (cur_char == '\n' || cur_char == '\r'){
+        if (cur_char == '\n' || cur_char == '\r') {
             ++line_no;
             ++char_pos;
             return makeToken(token_start, SyntaxPart{SyntaxPart::Type::NewLine});

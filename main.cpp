@@ -5,9 +5,25 @@
 #include <print>
 #include <string>
 #include <utility>
+#include <variant>
 
 #include "lexer/lexer.hpp"
+#include "lexer/lexing_error.hpp"
 #include "lexer/token_printer.hpp"
+#include "utils.hpp"
+
+namespace {
+
+void handleLexingError(const LexingError& error) {
+    std::visit(overloaded{
+                   [](const IntegerLiteralError& e) { std::println("Wrong integer literal: {}", e.literal); },
+                   [](const RealLiteralError& e) { std::println("Wrong real literal: {}", e.literal); },
+                   [](const UnknownToken& e) { std::println("Unknown token: {}", e.token); },
+               },
+               error);
+}
+
+} // namespace
 
 int main(int argc, const char** argv) {
     if (argc < 2) {
@@ -30,7 +46,7 @@ int main(int argc, const char** argv) {
     while (true) {
         auto tokenME = lexer.getNextToken();
         if (!tokenME) {
-            std::println("Lexing error");
+            handleLexingError(tokenME.error());
             return EXIT_FAILURE;
         }
         std::optional<Token>& tokenM = *tokenME;
