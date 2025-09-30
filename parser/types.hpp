@@ -6,19 +6,19 @@
 
 namespace parser {
 
-class VariableDeclaration;
-class IntegerType{};
-class RealType{};
-class BoolType{};
-class RecordType;
-class ArrayType;
+struct VariableDeclaration;
+struct IntegerType {};
+struct RealType {};
+struct BoolType {};
+struct RecordType;
+struct ArrayType;
 using Type = std::variant<IntegerType, RealType, BoolType, RecordType, ArrayType, std::string>;
 
-class RecordType {
+struct RecordType {
     std::vector<VariableDeclaration> fields;
 };
 
-class ArrayType {
+struct ArrayType {
     std::vector<Type> elements;
 };
 

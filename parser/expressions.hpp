@@ -6,12 +6,20 @@
 
 namespace parser {
 
-class BinaryOperation;
-class UnaryOperation;
-using Expression = std::variant<BinaryOperation, UnaryOperation>;
+struct BinaryOperation;
+struct UnaryOperation;
 
-class BinaryOperation {
-    enum class Type : char {
+struct IntegerLiteral;
+struct RealLiteral;
+struct BooleanLiteral;
+struct RoutineCall;
+struct ModifiablePrimary;
+using Primary = std::variant<IntegerLiteral, RealLiteral, BooleanLiteral, RoutineCall, ModifiablePrimary>;
+
+using Expression = std::variant<BinaryOperation, UnaryOperation, Primary>;
+
+struct BinaryOperation {
+    enum struct Type : char {
         And,
         Or,
         Xor,
@@ -26,45 +34,38 @@ class BinaryOperation {
         Modulo,
         Plus,
         Minus,
-    }; 
+    };
     std::unique_ptr<Expression> left, right;
 };
 
-class UnaryOperation {
-    enum class Type : char {
-        Not, 
+struct UnaryOperation {
+    enum struct Type : char {
+        Not,
         Plus,
         Minus,
     };
     std::unique_ptr<Expression> expr;
 };
 
-class IntegerLiteral;
-class RealLiteral;
-class BooleanLiteral;
-class RoutineCall;
-class ModifablePrimary;
-using Primary = std::variant<IntegerLiteral, RealLiteral, BooleanLiteral, RoutineCall, ModifablePrimary>;
-
-class IntegerLiteral {
+struct IntegerLiteral {
     long long value = 0;
 };
 
-class RealLiteral {
+struct RealLiteral {
     double value = 0;
 };
 
-class BooleanLiteral {
+struct BooleanLiteral {
     bool value = false;
 };
 
-class RoutineCall {
+struct RoutineCall {
     std::string name;
 };
 
-class ModifiablePrimary{
-    std::string first;
-    std::vector<std::variant<std::unique_ptr<Expression>, std::string>> accessors; 
+struct ModifiablePrimary {
+    std::string variable;
+    std::vector<std::variant<Expression, std::string>> accessors;
 };
 
 } // namespace parser

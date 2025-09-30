@@ -21,6 +21,7 @@ add_compile_options(-Wall -Wextra)
 add_executable(main
     lexer/lexer.cpp
     lexer/token_printer.cpp
+    parser/parser.cpp
     main.cpp
 )
 
