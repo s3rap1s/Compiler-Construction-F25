@@ -3,14 +3,33 @@
 #include "lexer/lexer.hpp"
 #include "lexer/tokens.hpp"
 #include "parser/declarations.hpp"
+#include "parser/expressions.hpp"
+#include "parser/statements.hpp"
 #include "parser/syntax_error.hpp"
 #include "parser/types.hpp"
 
 #include <expected>
+#include <memory>
 #include <optional>
 #include <utility>
 #include <variant>
 #include <vector>
+
+#define BIND(var, monad)                                                                                               \
+    auto&& var##E = monad;                                                                                             \
+    if (!var##E)                                                                                                       \
+        return std::unexpected{var##E.error()};                                                                        \
+    auto&& var = *var##E;
+
+#define BIND_UNIT(var, monad)                                                                                          \
+    if (auto&& var##E = monad; !var##E)                                                                                \
+        return std::unexpected{var##E.error()};
+
+#define BIND_SET(var, monad)                                                                                           \
+    auto&& var##E = monad;                                                                                             \
+    if (!var##E)                                                                                                       \
+        return std::unexpected{var##E.error()};                                                                        \
+    var = std::forward_like<decltype(var##E)>(*var##E);
 
 namespace parser {
 
@@ -19,6 +38,7 @@ namespace {
 using lexer::Token;
 using SyntaxPartType = lexer::SyntaxPart::Type;
 
+// NOLINTBEGIN(*-no-recursion)
 class Parser {
     std::vector<Token> tokens;
     std::vector<Token>::iterator next_token_it = tokens.begin();
@@ -27,7 +47,7 @@ class Parser {
     using ParsingExpected = std::expected<T, SyntaxError>;
 
     template <typename T>
-    [[nodiscard]] ParsingExpected<T> getNextToken() const {
+    [[nodiscard]] ParsingExpected<T> getToken() const {
         if (next_token_it == tokens.end())
             return std::unexpected{UnexpectedEndOfFile{}};
         Token& t = *next_token_it;
@@ -36,8 +56,16 @@ class Parser {
         return std::get<T>(t.payload);
     }
 
+    template <typename T>
+    [[nodiscard]] ParsingExpected<T> consumeToken() {
+        auto t = getToken<T>();
+        if (t)
+            ++next_token_it;
+        return t;
+    }
+
     ParsingExpected<void> assertKeyword(SyntaxPartType keyword) {
-        auto t = getNextToken<lexer::SyntaxPart>();
+        auto t = getToken<lexer::SyntaxPart>();
         if (!t && std::holds_alternative<UnexpectedTokenType>(t.error()))
             return std::unexpected{KeywordExpected{keyword}};
         return t.and_then([keyword, this](lexer::SyntaxPart& sp) -> ParsingExpected<void> {
@@ -88,30 +116,136 @@ class Parser {
     }
 
     ParsingExpected<VariableDeclaration> parseVariableDeclaration() {
-        if (auto var = assertKeyword(SyntaxPartType::Var); !var)
-            return std::unexpected{var.error()};
+        BIND_UNIT(var_keyword, assertKeyword(SyntaxPartType::Var));
+        BIND(id, consumeToken<lexer::Identifier>());
 
-        auto id = getNextToken<lexer::Identifier>();
-        if (!id)
-            return std::unexpected{id.error()};
-
-        auto colon = assertKeyword(SyntaxPartType::Colon);
-        if (colon) {
-            auto type = parseType();
-            if (!type)
-                return std::unexpected{type.error()};
+        if (auto colon = assertKeyword(SyntaxPartType::Colon)) {
+            BIND(type, parseType());
 
             auto is = assertKeyword(SyntaxPartType::Is);
             if (!is)
-                return VariableDeclaration{.identifier = id->name, .type = std::move(*type), .value = std::nullopt};
+                return VariableDeclaration{
+                    .identifier = std::move(id.name), .type = std::move(type), .value = std::nullopt};
+
+            BIND(init_value, parseExpression());
+            return VariableDeclaration{
+                .identifier = std::move(id.name), .type = std::move(type), .value = std::move(init_value)};
         }
+
+        if (auto is = assertKeyword(SyntaxPartType::Is)) {
+            BIND(init_value, parseExpression());
+            return VariableDeclaration{
+                .identifier = std::move(id.name), .type = std::nullopt, .value = std::move(init_value)};
+        }
+
+        return std::unexpected{KeywordsExpected{{SyntaxPartType::Is, SyntaxPartType::Colon}}};
     }
 
-    ParsingExpected<TypeDeclaration> parseTypeDeclaration() {}
+    ParsingExpected<TypeDeclaration> parseTypeDeclaration() {
+        BIND_UNIT(type_keyword, assertKeyword(SyntaxPartType::Type));
+        BIND(id, consumeToken<lexer::Identifier>());
+        BIND_UNIT(is, assertKeyword(SyntaxPartType::Is));
+        BIND(type, parseType());
+        return TypeDeclaration{.identifier = std::move(id.name), .type = std::move(type)};
+    }
 
-    ParsingExpected<RoutineDeclaration> parseRoutineDeclaration() {}
+    ParsingExpected<RoutineDeclaration> parseRoutineDeclaration() {
+        BIND_UNIT(routine_keyword, assertKeyword(SyntaxPartType::Routine));
+        BIND(id, consumeToken<lexer::Identifier>());
 
-    ParsingExpected<Type> parseType() {}
+        BIND_UNIT(open_par, assertKeyword(SyntaxPartType::OpenParenthesis));
+        std::vector<ParameterDecalration> params;
+        while (true) {
+            auto param_id = consumeToken<lexer::Identifier>();
+            if (!param_id)
+                break;
+            BIND_UNIT(colon, assertKeyword(SyntaxPartType::Colon));
+            BIND(type, parseType());
+            params.emplace_back(std::move(param_id->name), std::move(type));
+        }
+        if (auto closed_par = assertKeyword(SyntaxPartType::ClosedParenthesis); !closed_par)
+            return std::unexpected{RoutineParamOrCloseParExpected{}};
+
+        std::optional<Type> return_type;
+        if (auto colon = assertKeyword(SyntaxPartType::Colon)) {
+            BIND_SET(return_type, parseType());
+        }
+
+        decltype(RoutineDeclaration::body) body;
+        if (auto is = assertKeyword(SyntaxPartType::Is)) {
+            BIND_SET(body, parseBody());
+            BIND_UNIT(end, assertKeyword(SyntaxPartType::End));
+        }
+        if (auto arrow = assertKeyword(SyntaxPartType::Arrow)) {
+            BIND_SET(body, parseExpression());
+        }
+
+        return RoutineDeclaration{.identifier = std::move(id.name),
+                                  .parameters = std::move(params),
+                                  .body = std::move(body),
+                                  .return_type = std::move(return_type)};
+    }
+
+    ParsingExpected<Type> parseType() {
+        Type type;
+        if (auto id = consumeToken<lexer::Identifier>())
+            type = std::move(id->name);
+        else if (auto sp = getToken<lexer::SyntaxPart>()) {
+            switch (sp->type) {
+            case SyntaxPartType::Integer:
+                ++next_token_it;
+                type = IntegerType{};
+                break;
+            case SyntaxPartType::Real:
+                ++next_token_it;
+                type = RealType{};
+                break;
+            case SyntaxPartType::Boolean:
+                ++next_token_it;
+                type = BoolType{};
+                break;
+            case SyntaxPartType::Array: {
+                BIND_SET(type, parseArray());
+                break;
+            }
+            case SyntaxPartType::Record: {
+                BIND_SET(type, parseRecord());
+                break;
+            }
+            default:
+                return std::unexpected{TypeExpected{}};
+            }
+            return type;
+        }
+        return std::unexpected{TypeExpected{}};
+    }
+
+    ParsingExpected<ArrayType> parseArray() {
+        BIND_UNIT(array_keyword, assertKeyword(SyntaxPartType::Array));
+        BIND_UNIT(open_bracket, assertKeyword(SyntaxPartType::OpenBracket));
+        std::optional<Expression> size;
+        if (auto sizeE = parseExpression())
+            size = std::move(*sizeE);
+        BIND_UNIT(close_bracket, assertKeyword(SyntaxPartType::ClosedBracket));
+        BIND(type, parseType());
+        return ArrayType{.size = std::move(size), .element_type = std::make_unique<Type>(std::move(type))};
+    }
+
+    ParsingExpected<RecordType> parseRecord() {
+        BIND_UNIT(record_keyword, assertKeyword(SyntaxPartType::Record));
+        RecordType record;
+        while (true) {
+            auto var = parseVariableDeclaration();
+            if (!var)
+                break;
+            record.fields.push_back(std::move(*var));
+        }
+        return record;
+    }
+
+    ParsingExpected<Expression> parseExpression() {}
+
+    ParsingExpected<Block> parseBody() {}
 
   public:
     explicit Parser(lexer::Lexer lexer) {
@@ -129,6 +263,7 @@ class Parser {
         return parseProgram();
     }
 };
+// NOLINTEND(*-no-recursion)
 
 } // namespace
 

@@ -27,7 +27,7 @@ struct RoutineDeclaration {
     std::string identifier;
     std::vector<ParameterDecalration> parameters;
     std::optional<std::variant<Block, Expression>> body;
-    Type return_type;
+    std::optional<Type> return_type;
 };
 
 struct TypeDeclaration {

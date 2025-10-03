@@ -24,6 +24,15 @@ struct UnexpectedTokenType {
     explicit UnexpectedTokenType(const lexer::Token& token);
 };
 
-using SyntaxError = std::variant<KeywordExpected, KeywordsExpected, UnexpectedEndOfFile, UnexpectedTokenType>;
+struct RoutineParamOrCloseParExpected {};
+
+struct TypeExpected {};
+
+using SyntaxError = std::variant<KeywordExpected,
+                                 KeywordsExpected,
+                                 UnexpectedEndOfFile,
+                                 UnexpectedTokenType,
+                                 RoutineParamOrCloseParExpected,
+                                 TypeExpected>;
 
 } // namespace parser
