@@ -15,4 +15,9 @@ UnexpectedTokenType::UnexpectedTokenType(const lexer::Token& token) {
     }, token.payload);
 }
 
-} // namespace parser
+LiteralExpected::LiteralExpected(Proxy<lexer::IntegerLiteral> /*unused*/) : expected{"integer"} {}
+LiteralExpected::LiteralExpected(Proxy<lexer::RealLiteral> /*unused*/) : expected{"real"} {}
+LiteralExpected::LiteralExpected(Proxy<lexer::BooleanLiteral> /*unused*/) : expected{"boolean"} {}
+LiteralExpected::LiteralExpected(Proxy<lexer::StringLiteral> /*unused*/) : expected{"string"} {}
+
+}  // namespace parser

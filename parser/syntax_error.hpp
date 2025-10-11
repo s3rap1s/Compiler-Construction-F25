@@ -1,6 +1,7 @@
 #pragma once
 
 #include "lexer/tokens.hpp"
+#include "utils.hpp"
 
 #include <string>
 #include <variant>
@@ -28,11 +29,27 @@ struct RoutineParamOrCloseParExpected {};
 
 struct TypeExpected {};
 
+struct LiteralExpected {
+    std::string expected;
+
+    explicit LiteralExpected(Proxy<lexer::IntegerLiteral>);
+    explicit LiteralExpected(Proxy<lexer::RealLiteral>);
+    explicit LiteralExpected(Proxy<lexer::BooleanLiteral>);
+    explicit LiteralExpected(Proxy<lexer::StringLiteral>);
+};
+
+struct NumberLiteralExpected {};
+
+struct PrimaryExpressionExpected {};
+
 using SyntaxError = std::variant<KeywordExpected,
                                  KeywordsExpected,
                                  UnexpectedEndOfFile,
                                  UnexpectedTokenType,
                                  RoutineParamOrCloseParExpected,
-                                 TypeExpected>;
+                                 TypeExpected,
+                                 LiteralExpected,
+                                 NumberLiteralExpected,
+                                 PrimaryExpressionExpected>;
 
 } // namespace parser
