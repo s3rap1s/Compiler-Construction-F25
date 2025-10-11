@@ -6,9 +6,7 @@
 #include <charconv>
 #include <cstddef>
 #include <expected>
-#include <format>
 #include <optional>
-#include <stdexcept>
 #include <string_view>
 #include <unordered_map>
 #include <utility>
@@ -56,8 +54,8 @@ const std::unordered_map<std::string_view, SyntaxPart::Type> kPunctuationMap = [
     std::unordered_map<std::string_view, SyntaxPart::Type> map;
     map["=>"] = SyntaxPart::Type::Arrow;
     map[":="] = SyntaxPart::Type::Assignment;
-    map["]"] = SyntaxPart::Type::ClosedBracket;
-    map[")"] = SyntaxPart::Type::ClosedParenthesis;
+    map["]"] = SyntaxPart::Type::CloseBracket;
+    map[")"] = SyntaxPart::Type::CloseParenthesis;
     map[":"] = SyntaxPart::Type::Colon;
     map[","] = SyntaxPart::Type::Comma;
     map["/"] = SyntaxPart::Type::Divide;

@@ -23,8 +23,8 @@ constexpr auto kSyntaxPartSpellings = [] {
     map[toSizeT(Type::Assignment)] = ":=";
     map[toSizeT(Type::Begin)] = "begin";
     map[toSizeT(Type::Boolean)] = "boolean";
-    map[toSizeT(Type::ClosedBracket)] = "]";
-    map[toSizeT(Type::ClosedParenthesis)] = ")";
+    map[toSizeT(Type::CloseBracket)] = "]";
+    map[toSizeT(Type::CloseParenthesis)] = ")";
     map[toSizeT(Type::Colon)] = ":";
     map[toSizeT(Type::Comma)] = ",";
     map[toSizeT(Type::Divide)] = "/";
@@ -39,7 +39,7 @@ constexpr auto kSyntaxPartSpellings = [] {
     map[toSizeT(Type::In)] = "in";
     map[toSizeT(Type::Integer)] = "integer";
     map[toSizeT(Type::Is)] = "is";
-    map[toSizeT(Type::Less)] = "<"; 
+    map[toSizeT(Type::Less)] = "<";
     map[toSizeT(Type::LessEqual)] = "<=";
     map[toSizeT(Type::Loop)] = "loop";
     map[toSizeT(Type::Minus)] = "-";
@@ -73,8 +73,8 @@ bool isPunctuation(SyntaxPart::Type type) {
     switch (type) {
     case Type::Arrow:
     case Type::Assignment:
-    case Type::ClosedBracket:
-    case Type::ClosedParenthesis:
+    case Type::CloseBracket:
+    case Type::CloseParenthesis:
     case Type::Colon:
     case Type::Comma:
     case Type::Divide:
