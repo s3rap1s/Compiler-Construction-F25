@@ -1,5 +1,6 @@
 #include "parser.hpp"
 
+#include "common.hpp"
 #include "lexer/lexer.hpp"
 #include "lexer/tokens.hpp"
 #include "parser/declarations.hpp"
@@ -21,19 +22,19 @@
 #define BIND(var, monad)                                                                                               \
     auto&& var##E = monad;                                                                                             \
     if (!var##E)                                                                                                       \
-        return std::unexpected{var##E.error()};                                                                        \
+        return std::unexpected{std::move(var##E).error()};                                                             \
     auto&& var = *var##E;
 
 #define BIND_VOID(monad)                                                                                               \
     if (auto&& exp = monad; !exp)                                                                                      \
-        return std::unexpected{exp.error()};
+        return std::unexpected{std::move(exp).error()};
 
 #define BIND_SET(var, monad)                                                                                           \
     {                                                                                                                  \
         auto&& monad_ = monad;                                                                                         \
         if (!monad_)                                                                                                   \
-            return std::unexpected{monad_.error()};                                                                    \
-        var = std::forward_like<decltype(monad_)>(*monad_);                                                            \
+            return std::unexpected{std::move(monad_).error()};                                                         \
+        var = *std::move(monad_);                                                                                      \
     }
 
 namespace parser {
@@ -65,14 +66,23 @@ class Parser {
         ++next_token_it;
     }
 
+    [[nodiscard]] const Span& getTokenSpan() const {
+        return next_token_it->span;
+    }
+
+    template <typename T>
+    std::unexpected<SyntaxError> makeError(Span span, T&& payload) const {
+        return std::unexpected{SyntaxError{.span = span, .payload = std::forward<T>(payload)}};
+    }
+
     template <typename T>
         requires IsPartOfVariant<T, Token::Payload>
     [[nodiscard]] ParsingExpected<T> getToken() const {
         if (next_token_it == tokens.end())
-            return std::unexpected{UnexpectedEndOfFile{}};
+            return std::unexpected{SyntaxError{.span = std::nullopt, .payload = UnexpectedEndOfFile{}}};
         Token& t = *next_token_it;
         if (!std::holds_alternative<T>(t.payload))
-            return std::unexpected{UnexpectedTokenType{t}};
+            return makeError(t.span, TokenExpected{Proxy<T>{}});
         return std::get<T>(t.payload);
     }
 
@@ -89,7 +99,7 @@ class Parser {
     [[nodiscard]] ParsingExpected<void> assertKeyword() const {
         ParsingExpected<lexer::SyntaxPart> t = getToken<lexer::SyntaxPart>();
         if (!t || t->type != keyword)
-            return std::unexpected{KeywordExpected{keyword}};
+            return makeError(getTokenSpan(), KeywordExpected{keyword});
         return {};
     }
 
@@ -106,7 +116,7 @@ class Parser {
         static constexpr auto kws = {keywords...};
         auto t = getToken<lexer::SyntaxPart>();
         if (!t || !std::ranges::contains(kws, t->type))
-            return std::unexpected{KeywordsExpected{{keywords...}}};
+            return makeError(getTokenSpan(), KeywordsExpected{kws});
         return t->type;
     }
 
@@ -123,7 +133,7 @@ class Parser {
     [[nodiscard]] ParsingExpected<T> consumeLiteral() {
         ParsingExpected<lexer::Literal> lit = getToken<lexer::Literal>();
         if (!lit || !std::holds_alternative<T>(*lit))
-            return std::unexpected{LiteralExpected{Proxy<T>{}}};
+            return makeError(getTokenSpan(), LiteralExpected{Proxy<T>{}});
         return std::move(std::get<T>(*lit));
     }
 
@@ -131,7 +141,7 @@ class Parser {
         Program program;
         while (true) {
             auto keywordE = assertKeywords<SyntaxPartType::Var, SyntaxPartType::Type, SyntaxPartType::Routine>();
-            if (!keywordE && std::holds_alternative<UnexpectedEndOfFile>(keywordE.error()))
+            if (!keywordE && std::holds_alternative<UnexpectedEndOfFile>(keywordE.error().payload))
                 break;
             if (!keywordE)
                 return std::unexpected{std::move(keywordE).error()};
@@ -237,7 +247,7 @@ class Parser {
                                       SyntaxPartType::Array,
                                       SyntaxPartType::Record>();
         if (!keyword)
-            return std::unexpected{TypeExpected{}};
+            return makeError(getTokenSpan(), TypeExpected{});
 
         switch (*keyword) {
         case SyntaxPartType::Integer:
@@ -388,7 +398,7 @@ class Parser {
                 return IntegerLiteral{minus ? -lit->value : lit->value};
             if (auto lit = consumeLiteral<lexer::RealLiteral>())
                 return RealLiteral{minus ? -lit->value : lit->value};
-            return std::unexpected{NumberLiteralExpected{}};
+            return makeError(getTokenSpan(), NumberLiteralExpected{});
         }
 
         if (auto id = consumeToken<lexer::Identifier>()) {
@@ -402,7 +412,7 @@ class Parser {
             return std::move(modifyable);
         }
 
-        return std::unexpected{PrimaryExpressionExpected{}};
+        return makeError(getTokenSpan(), PrimaryExpressionExpected{});
     }
 
     ParsingExpected<RoutineCall> parseRoutineCall(lexer::Identifier routine) {

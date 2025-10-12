@@ -1,6 +1,7 @@
 #pragma once
 
-#include <cstddef>
+#include "common.hpp"
+
 #include <string>
 #include <utility>
 #include <variant>
@@ -85,12 +86,6 @@ struct SyntaxPart {
     };
 
     Type type;
-};
-
-struct Span {
-    std::size_t line_no;
-    std::size_t begin;
-    std::size_t end;
 };
 
 struct Token {

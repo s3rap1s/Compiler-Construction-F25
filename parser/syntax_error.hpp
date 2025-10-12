@@ -3,6 +3,7 @@
 #include "lexer/tokens.hpp"
 #include "utils.hpp"
 
+#include <optional>
 #include <string>
 #include <variant>
 #include <vector>
@@ -19,10 +20,12 @@ struct KeywordsExpected {
 
 struct UnexpectedEndOfFile {};
 
-struct UnexpectedTokenType {
-    std::string token_type;
+struct TokenExpected {
+    std::string expected;
 
-    explicit UnexpectedTokenType(const lexer::Token& token);
+    explicit TokenExpected(Proxy<lexer::Literal>);
+    explicit TokenExpected(Proxy<lexer::Identifier>);
+    explicit TokenExpected(Proxy<lexer::SyntaxPart>);
 };
 
 struct RoutineParamOrCloseParExpected {};
@@ -42,14 +45,19 @@ struct NumberLiteralExpected {};
 
 struct PrimaryExpressionExpected {};
 
-using SyntaxError = std::variant<KeywordExpected,
+struct SyntaxError {
+    using Payload = std::variant<KeywordExpected,
                                  KeywordsExpected,
                                  UnexpectedEndOfFile,
-                                 UnexpectedTokenType,
+                                 TokenExpected,
                                  RoutineParamOrCloseParExpected,
                                  TypeExpected,
                                  LiteralExpected,
                                  NumberLiteralExpected,
                                  PrimaryExpressionExpected>;
+
+    std::optional<Span> span;
+    Payload payload;
+};
 
 } // namespace parser
