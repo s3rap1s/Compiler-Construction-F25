@@ -14,9 +14,12 @@ struct WhileStatement;
 struct ForStatement;
 struct IfStatement;
 struct PrintStatement;
-using Statement = std::variant<AssignmentStatement, WhileStatement, ForStatement, IfStatement, PrintStatement>;
+using Statement = std::variant<AssignmentStatement, RoutineCall, WhileStatement, ForStatement, IfStatement, PrintStatement>;
 
-using Block = std::vector<Statement>;
+struct VariableDeclaration;
+struct TypeDeclaration;
+using Block = std::vector<std::variant<VariableDeclaration, TypeDeclaration, Statement>>;
+
 using StringLiteral = lexer::StringLiteral;
 
 struct AssignmentStatement {
@@ -36,10 +39,10 @@ struct WhileStatement {
 };
 
 struct ForStatement {
-    std::string identifier;
+    std::string counter;
     std::variant<Expression, std::pair<Expression, Expression>> range;
     Block body;
-    bool is_reverse;
+    bool is_reversed;
 };
 
 struct PrintStatement {

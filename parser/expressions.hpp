@@ -1,5 +1,7 @@
 #pragma once
 
+#include "lexer/tokens.hpp"
+
 #include <memory>
 #include <optional>
 #include <variant>
@@ -7,27 +9,15 @@
 
 namespace parser {
 
-struct IntegerLiteral;
-struct RealLiteral;
-struct BooleanLiteral;
+using IntegerLiteral = lexer::IntegerLiteral;
+using RealLiteral = lexer::RealLiteral;
+using BooleanLiteral = lexer::BooleanLiteral;
 struct RoutineCall;
 struct ModifiablePrimary;
 using Primary = std::variant<IntegerLiteral, RealLiteral, BooleanLiteral, RoutineCall, ModifiablePrimary>;
 
 struct Expression;
 using Factor = std::variant<Primary, std::unique_ptr<Expression>>;
-
-struct IntegerLiteral {
-    long long value = 0;
-};
-
-struct RealLiteral {
-    double value = 0;
-};
-
-struct BooleanLiteral {
-    bool value = false;
-};
 
 struct RoutineCall {
     std::string name;

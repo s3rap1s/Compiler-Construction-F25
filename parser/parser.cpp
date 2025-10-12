@@ -58,37 +58,48 @@ using SyntaxPartType = lexer::SyntaxPart::Type;
 class Parser {
     std::vector<Token> tokens;
     std::vector<Token>::iterator next_token_it = tokens.begin();
+    Span last_span{};
 
     template <typename T>
     using ParsingExpected = std::expected<T, SyntaxError>;
 
     void skipToken() {
+        last_span = next_token_it->span;
         ++next_token_it;
     }
 
-    [[nodiscard]] const Span& getTokenSpan() const {
+    [[nodiscard]] Span getTokenSpan() const {
+        if (next_token_it == tokens.end())
+            return last_span;
         return next_token_it->span;
     }
 
     template <typename T>
-    std::unexpected<SyntaxError> makeError(Span span, T&& payload) const {
+    [[nodiscard]] std::unexpected<SyntaxError> makeError(Span span, T&& payload) const {
         return std::unexpected{SyntaxError{.span = span, .payload = std::forward<T>(payload)}};
     }
 
     template <typename T>
         requires IsPartOfVariant<T, Token::Payload>
-    [[nodiscard]] ParsingExpected<T> getToken() const {
-        if (next_token_it == tokens.end())
-            return std::unexpected{SyntaxError{.span = std::nullopt, .payload = UnexpectedEndOfFile{}}};
-        Token& t = *next_token_it;
-        if (!std::holds_alternative<T>(t.payload))
-            return makeError(t.span, TokenExpected{Proxy<T>{}});
-        return std::get<T>(t.payload);
+    [[nodiscard]] ParsingExpected<T> getToken() {
+        while (true) {
+            if (next_token_it == tokens.end())
+                return std::unexpected{SyntaxError{.span = std::nullopt, .payload = UnexpectedEndOfFile{}}};
+
+            Token& t = *next_token_it;
+            if (auto* sp = std::get_if<lexer::SyntaxPart>(&t.payload); sp && sp->type == SyntaxPartType::NewLine) {
+                ++next_token_it;
+                continue;
+            }
+            if (!std::holds_alternative<T>(t.payload))
+                return makeError(t.span, TokenExpected{Proxy<T>{}});
+            return std::get<T>(t.payload);
+        }
     }
 
     template <typename T>
         requires IsPartOfVariant<T, Token::Payload>
-    [[nodiscard]] ParsingExpected<T> consumeToken() {
+    ParsingExpected<T> consumeToken() {
         ParsingExpected<T> t = getToken<T>();
         if (t)
             skipToken();
@@ -96,7 +107,7 @@ class Parser {
     }
 
     template <SyntaxPartType keyword>
-    [[nodiscard]] ParsingExpected<void> assertKeyword() const {
+    [[nodiscard]] ParsingExpected<void> assertKeyword() {
         ParsingExpected<lexer::SyntaxPart> t = getToken<lexer::SyntaxPart>();
         if (!t || t->type != keyword)
             return makeError(getTokenSpan(), KeywordExpected{keyword});
@@ -112,7 +123,7 @@ class Parser {
     }
 
     template <SyntaxPartType... keywords>
-    [[nodiscard]] ParsingExpected<SyntaxPartType> assertKeywords() const {
+    [[nodiscard]] ParsingExpected<SyntaxPartType> assertKeywords() {
         static constexpr auto kws = {keywords...};
         auto t = getToken<lexer::SyntaxPart>();
         if (!t || !std::ranges::contains(kws, t->type))
@@ -121,7 +132,7 @@ class Parser {
     }
 
     template <SyntaxPartType... keywords>
-    [[nodiscard]] ParsingExpected<SyntaxPartType> consumeKeywords() {
+    ParsingExpected<SyntaxPartType> consumeKeywords() {
         ParsingExpected<SyntaxPartType> t = assertKeywords<keywords...>();
         if (t)
             skipToken();
@@ -130,11 +141,25 @@ class Parser {
 
     template <typename T>
         requires IsPartOfVariant<T, lexer::Literal>
-    [[nodiscard]] ParsingExpected<T> consumeLiteral() {
+    ParsingExpected<T> consumeLiteral() {
         ParsingExpected<lexer::Literal> lit = getToken<lexer::Literal>();
         if (!lit || !std::holds_alternative<T>(*lit))
             return makeError(getTokenSpan(), LiteralExpected{Proxy<T>{}});
         return std::move(std::get<T>(*lit));
+    }
+
+    [[nodiscard]] bool assertSeparator() const {
+        if (next_token_it == tokens.end())
+            return false;
+        auto* sp = std::get_if<lexer::SyntaxPart>(&next_token_it->payload);
+        return sp != nullptr && (sp->type == SyntaxPartType::NewLine || sp->type == SyntaxPartType::Semicolon);
+    }
+
+    bool consumeSeparator() {
+        bool found = assertSeparator();
+        if (found)
+            ++next_token_it;
+        return found;
     }
 
     ParsingExpected<Program> parseProgram() {
@@ -223,7 +248,7 @@ class Parser {
         std::optional<std::variant<Block, Expression>> body;
         BIND(keyword, (consumeKeywords<SyntaxPartType::Is, SyntaxPartType::End>()));
         if (keyword == SyntaxPartType::Is) {
-            BIND_SET(body, parseBody());
+            BIND_SET(body, parseBlock());
             BIND_VOID(consumeKeyword<SyntaxPartType::End>());
         } else if (keyword == SyntaxPartType::Arrow) {
             BIND_SET(body, parseExpression());
@@ -385,7 +410,7 @@ class Parser {
         }
 
         if (auto lit = consumeLiteral<lexer::BooleanLiteral>())
-            return BooleanLiteral{lit->value};
+            return lit;
 
         if (consumeKeyword<SyntaxPartType::Not>()) {
             BIND(lit, consumeLiteral<lexer::IntegerLiteral>());
@@ -451,7 +476,157 @@ class Parser {
         return mp;
     }
 
-    ParsingExpected<Block> parseBody() {}
+    ParsingExpected<Block> parseBlock() { // NOLINT(*complexity)
+        Block block;
+        while (true) {
+            if (auto id = consumeToken<lexer::Identifier>()) {
+                // assertSeparator should be first to not skip it by mistake in other functions
+                if (assertSeparator() || assertKeyword<SyntaxPartType::OpenParenthesis>()) {
+                    BIND(call, parseRoutineCall(std::move(*id)));
+                    block.emplace_back(std::move(call));
+                } else if (auto op = assertKeywords<SyntaxPartType::Assignment,
+                                                    SyntaxPartType::Dot,
+                                                    SyntaxPartType::OpenBracket>()) {
+                    BIND(assignment, parseAssignment(std::move(*id)));
+                    block.emplace_back(std::move(assignment));
+                } else {
+                    return makeError(getTokenSpan(),
+                                     KeywordsExpected{{SyntaxPartType::OpenParenthesis,
+                                                       SyntaxPartType::Assignment,
+                                                       SyntaxPartType::Dot,
+                                                       SyntaxPartType::OpenBracket}});
+                }
+            } else if (auto keyword = assertKeywords<SyntaxPartType::Var,
+                                                     SyntaxPartType::Type,
+                                                     SyntaxPartType::While,
+                                                     SyntaxPartType::For,
+                                                     SyntaxPartType::If,
+                                                     SyntaxPartType::Print>()) {
+                switch (*keyword) {
+                case SyntaxPartType::Var: {
+                    BIND(var_declaration, parseVariableDeclaration());
+                    block.emplace_back(std::move(var_declaration));
+                }
+                case SyntaxPartType::Type: {
+                    BIND(type_declaration, parseTypeDeclaration());
+                    block.emplace_back(std::move(type_declaration));
+                }
+                case SyntaxPartType::While: {
+                    BIND(while_loop, parseWhileLoop());
+                    block.emplace_back(std::move(while_loop));
+                }
+                case SyntaxPartType::For: {
+                    BIND(for_loop, parseForLoop());
+                    block.emplace_back(std::move(for_loop));
+                }
+                case SyntaxPartType::If: {
+                    BIND(if_statement, parseIfStatement());
+                    block.emplace_back(std::move(if_statement));
+                }
+                case SyntaxPartType::Print: {
+                    BIND(print, parsePrintStatement());
+                    block.emplace_back(std::move(print));
+                }
+                default:
+                    std::unreachable();
+                }
+            } else {
+                break;
+            }
+
+            // if parsed body line succesfully then check separator to continue parsing body
+            if (consumeSeparator())
+                continue;
+            break;
+        }
+        return block;
+    }
+
+    ParsingExpected<AssignmentStatement> parseAssignment(lexer::Identifier base) {
+        BIND(target, parseModifablePrimary(std::move(base)));
+        BIND_VOID(consumeKeyword<SyntaxPartType::Assignment>());
+        BIND(expr, parseExpression());
+        return AssignmentStatement{.target = std::move(target), .expression = std::move(expr)};
+    }
+
+    ParsingExpected<WhileStatement> parseWhileLoop() {
+        BIND_VOID(consumeKeyword<SyntaxPartType::While>());
+        BIND(condition, parseExpression());
+        BIND_VOID(consumeKeyword<SyntaxPartType::Loop>());
+        BIND(body, parseBlock());
+        BIND_VOID(consumeKeyword<SyntaxPartType::End>());
+        return WhileStatement{.condition = std::move(condition), .body = std::move(body)};
+    }
+
+    ParsingExpected<ForStatement> parseForLoop() {
+        BIND_VOID(consumeKeyword<SyntaxPartType::For>());
+        BIND(counter, consumeToken<lexer::Identifier>());
+
+        BIND_VOID(consumeKeyword<SyntaxPartType::In>());
+        BIND(first_expr, parseExpression());
+        std::optional<Expression> second_expr;
+        if (consumeKeyword<SyntaxPartType::Range>())
+            BIND_SET(second_expr, parseExpression());
+
+        bool reversed = consumeKeyword<SyntaxPartType::Reverse>().has_value();
+
+        BIND_VOID(consumeKeyword<SyntaxPartType::Loop>());
+        BIND(body, parseBlock());
+        BIND_VOID(consumeKeyword<SyntaxPartType::End>());
+
+        if (second_expr) {
+            return ForStatement{.counter = std::move(counter).name,
+                                .range{std::in_place_index<1>, std::move(first_expr), std::move(*second_expr)},
+                                .body = std::move(body),
+                                .is_reversed = reversed};
+        }
+        return ForStatement{.counter = std::move(counter).name,
+                            .range = std::move(first_expr),
+                            .body = std::move(body),
+                            .is_reversed = reversed};
+    }
+
+    ParsingExpected<IfStatement> parseIfStatement() {
+        BIND_VOID(consumeKeyword<SyntaxPartType::If>());
+        BIND(condition, parseExpression());
+
+        BIND_VOID(consumeKeyword<SyntaxPartType::Then>());
+        BIND(true_branch, parseBlock());
+
+        std::optional<Block> false_branch;
+        if (consumeKeyword<SyntaxPartType::Else>())
+            BIND_SET(false_branch, parseBlock());
+
+        BIND_VOID(consumeKeyword<SyntaxPartType::End>());
+        return IfStatement{.condition = std::move(condition),
+                           .true_branch = std::move(true_branch),
+                           .false_branch = std::move(false_branch)};
+    }
+
+    ParsingExpected<PrintStatement> parsePrintStatement() {
+        BIND_VOID(consumeKeyword<SyntaxPartType::Print>());
+        PrintStatement print;
+
+        if (assertSeparator())
+            return print;
+
+        if (auto string = consumeLiteral<StringLiteral>())
+            print.arguments.emplace_back(std::move(*string));
+        else if (auto expr = parseExpression())
+            print.arguments.emplace_back(std::move(*expr));
+        else
+            return print;
+
+        while (consumeKeyword<SyntaxPartType::Comma>()) {
+            if (auto string = consumeLiteral<StringLiteral>())
+                print.arguments.emplace_back(std::move(*string));
+            else if (auto expr = parseExpression())
+                print.arguments.emplace_back(std::move(*expr));
+            else
+                return makeError(getTokenSpan(), StringLiteralOrExpressionExpected{});
+        }
+        return print;
+    }
 
   public:
     explicit Parser(lexer::Lexer lexer) {

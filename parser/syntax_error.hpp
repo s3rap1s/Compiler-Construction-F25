@@ -1,5 +1,6 @@
 #pragma once
 
+#include "lexer/lexing_error.hpp"
 #include "lexer/tokens.hpp"
 #include "utils.hpp"
 
@@ -45,8 +46,11 @@ struct NumberLiteralExpected {};
 
 struct PrimaryExpressionExpected {};
 
+struct StringLiteralOrExpressionExpected {};
+
 struct SyntaxError {
-    using Payload = std::variant<KeywordExpected,
+    using Payload = std::variant<lexer::LexingError,
+                                 KeywordExpected,
                                  KeywordsExpected,
                                  UnexpectedEndOfFile,
                                  TokenExpected,
@@ -54,7 +58,8 @@ struct SyntaxError {
                                  TypeExpected,
                                  LiteralExpected,
                                  NumberLiteralExpected,
-                                 PrimaryExpressionExpected>;
+                                 PrimaryExpressionExpected,
+                                 StringLiteralOrExpressionExpected>;
 
     std::optional<Span> span;
     Payload payload;
