@@ -31,9 +31,12 @@ class Lexer {
     [[nodiscard]] Token makeToken(std::size_t token_start, Token::Payload payload) const;
 
   public:
+    using ResultType = std::expected<Token, LexingError>;
+
     explicit Lexer(std::string file) : file{std::move(file)} {}
 
-    std::expected<std::optional<Token>, LexingError> getNextToken();
+    // nullopt is end of stream
+    std::optional<ResultType> getNextToken();
 };
 
 } // namespace lexer

@@ -46,14 +46,16 @@ int main(int argc, const char** argv) {
 
     Lexer lexer{std::move(s)};
     while (true) {
-        auto tokenME = lexer.getNextToken();
-        if (!tokenME) {
-            handleLexingError(tokenME.error());
+        auto resultO = lexer.getNextToken();
+        if (!resultO)
+            break;
+
+        Lexer::ResultType& result = *resultO;
+        if (!result) {
+            handleLexingError(result.error());
             return EXIT_FAILURE;
         }
-        std::optional<Token>& tokenM = *tokenME;
-        if (!tokenM)
-            break;
-        TokenPrinter::print(*tokenM);
+
+        TokenPrinter::print(*result);
     }
 }

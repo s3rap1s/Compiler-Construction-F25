@@ -92,7 +92,7 @@ std::optional<SyntaxPart::Type> findPunctuation(std::string_view token) {
     return Token{getCurrentSpan(token_start), std::move(payload)};
 }
 
-std::expected<std::optional<Token>, LexingError> Lexer::getNextToken() {
+auto Lexer::getNextToken() -> std::optional<ResultType> {
     // NOLINTBEGIN(*bool-conversion*)
     if (char_pos == file.size())
         return std::nullopt;

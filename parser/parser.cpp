@@ -1,6 +1,7 @@
 #include "parser.hpp"
 
 #include "common.hpp"
+#include "lexer/iterator.hpp"
 #include "lexer/lexer.hpp"
 #include "lexer/tokens.hpp"
 #include "parser/declarations.hpp"
@@ -13,6 +14,7 @@
 #include <algorithm>
 #include <expected>
 #include <initializer_list>
+#include <iterator>
 #include <memory>
 #include <optional>
 #include <utility>
@@ -56,8 +58,9 @@ using SyntaxPartType = lexer::SyntaxPart::Type;
 
 // NOLINTBEGIN(*-no-recursion)
 class Parser {
-    std::vector<Token> tokens;
-    std::vector<Token>::iterator next_token_it = tokens.begin();
+    lexer::Lexer lexer;
+    std::optional<lexer::Lexer::ResultType> token_store = std::nullopt;
+    lexer::TokenIterator next_token_it{lexer, token_store}; // initialize after lexer and token store
     Span last_span{};
 
     template <typename T>
@@ -68,14 +71,19 @@ class Parser {
         ++next_token_it;
     }
 
-    [[nodiscard]] Span getTokenSpan() const {
-        if (next_token_it == tokens.end())
+    [[nodiscard]] bool isSuccessfullEnd() const {
+        // either last result is not an error or no tokens were fetched since the beginning
+        return next_token_it == std::default_sentinel && (!token_store || *token_store);
+    }
+
+    [[nodiscard]] Span getLastSpan() const {
+        if (next_token_it == std::default_sentinel)
             return last_span;
         return next_token_it->span;
     }
 
     template <typename T>
-    [[nodiscard]] std::unexpected<SyntaxError> makeError(Span span, T&& payload) const {
+    [[nodiscard]] static std::unexpected<SyntaxError> makeError(Span span, T&& payload) {
         return std::unexpected{SyntaxError{.span = span, .payload = std::forward<T>(payload)}};
     }
 
@@ -83,12 +91,15 @@ class Parser {
         requires IsPartOfVariant<T, Token::Payload>
     [[nodiscard]] ParsingExpected<T> getToken() {
         while (true) {
-            if (next_token_it == tokens.end())
-                return std::unexpected{SyntaxError{.span = std::nullopt, .payload = UnexpectedEndOfFile{}}};
+            if (next_token_it == std::default_sentinel) {
+                if (isSuccessfullEnd())
+                    return std::unexpected{SyntaxError{.span = getLastSpan(), .payload = UnexpectedEndOfFile{}}};
+                return std::unexpected{SyntaxError{.span = getLastSpan(), .payload = std::move(token_store->error())}};
+            }
 
             Token& t = *next_token_it;
             if (auto* sp = std::get_if<lexer::SyntaxPart>(&t.payload); sp && sp->type == SyntaxPartType::NewLine) {
-                ++next_token_it;
+                skipToken();
                 continue;
             }
             if (!std::holds_alternative<T>(t.payload))
@@ -110,7 +121,7 @@ class Parser {
     [[nodiscard]] ParsingExpected<void> assertKeyword() {
         ParsingExpected<lexer::SyntaxPart> t = getToken<lexer::SyntaxPart>();
         if (!t || t->type != keyword)
-            return makeError(getTokenSpan(), KeywordExpected{keyword});
+            return makeError(getLastSpan(), KeywordExpected{keyword});
         return {};
     }
 
@@ -127,7 +138,7 @@ class Parser {
         static constexpr auto kws = {keywords...};
         auto t = getToken<lexer::SyntaxPart>();
         if (!t || !std::ranges::contains(kws, t->type))
-            return makeError(getTokenSpan(), KeywordsExpected{kws});
+            return makeError(getLastSpan(), KeywordsExpected{kws});
         return t->type;
     }
 
@@ -144,21 +155,21 @@ class Parser {
     ParsingExpected<T> consumeLiteral() {
         ParsingExpected<lexer::Literal> lit = getToken<lexer::Literal>();
         if (!lit || !std::holds_alternative<T>(*lit))
-            return makeError(getTokenSpan(), LiteralExpected{Proxy<T>{}});
+            return makeError(getLastSpan(), LiteralExpected{Proxy<T>{}});
         return std::move(std::get<T>(*lit));
     }
 
     [[nodiscard]] bool assertSeparator() const {
-        if (next_token_it == tokens.end())
+        if (next_token_it == std::default_sentinel)
             return false;
-        auto* sp = std::get_if<lexer::SyntaxPart>(&next_token_it->payload);
+        const auto* sp = std::get_if<lexer::SyntaxPart>(&next_token_it->payload);
         return sp != nullptr && (sp->type == SyntaxPartType::NewLine || sp->type == SyntaxPartType::Semicolon);
     }
 
     bool consumeSeparator() {
         bool found = assertSeparator();
         if (found)
-            ++next_token_it;
+            skipToken();
         return found;
     }
 
@@ -272,7 +283,7 @@ class Parser {
                                       SyntaxPartType::Array,
                                       SyntaxPartType::Record>();
         if (!keyword)
-            return makeError(getTokenSpan(), TypeExpected{});
+            return makeError(getLastSpan(), TypeExpected{});
 
         switch (*keyword) {
         case SyntaxPartType::Integer:
@@ -423,7 +434,7 @@ class Parser {
                 return IntegerLiteral{minus ? -lit->value : lit->value};
             if (auto lit = consumeLiteral<lexer::RealLiteral>())
                 return RealLiteral{minus ? -lit->value : lit->value};
-            return makeError(getTokenSpan(), NumberLiteralExpected{});
+            return makeError(getLastSpan(), NumberLiteralExpected{});
         }
 
         if (auto id = consumeToken<lexer::Identifier>()) {
@@ -437,7 +448,7 @@ class Parser {
             return std::move(modifyable);
         }
 
-        return makeError(getTokenSpan(), PrimaryExpressionExpected{});
+        return makeError(getLastSpan(), PrimaryExpressionExpected{});
     }
 
     ParsingExpected<RoutineCall> parseRoutineCall(lexer::Identifier routine) {
@@ -490,7 +501,7 @@ class Parser {
                     BIND(assignment, parseAssignment(std::move(*id)));
                     block.emplace_back(std::move(assignment));
                 } else {
-                    return makeError(getTokenSpan(),
+                    return makeError(getLastSpan(),
                                      KeywordsExpected{{SyntaxPartType::OpenParenthesis,
                                                        SyntaxPartType::Assignment,
                                                        SyntaxPartType::Dot,
@@ -623,22 +634,13 @@ class Parser {
             else if (auto expr = parseExpression())
                 print.arguments.emplace_back(std::move(*expr));
             else
-                return makeError(getTokenSpan(), StringLiteralOrExpressionExpected{});
+                return makeError(getLastSpan(), StringLiteralOrExpressionExpected{});
         }
         return print;
     }
 
   public:
-    explicit Parser(lexer::Lexer lexer) {
-        while (true) {
-            auto tokenME = lexer.getNextToken();
-            if (!tokenME)
-                throw;
-            if (!*tokenME)
-                break;
-            tokens.push_back(**tokenME);
-        }
-    }
+    explicit Parser(lexer::Lexer lexer) : lexer{std::move(lexer)} {}
 
     std::expected<Program, SyntaxError> parse() {
         return parseProgram();
