@@ -12,11 +12,11 @@
 namespace parser {
 
 struct KeywordExpected {
-    lexer::SyntaxPart::Type keyword;
+    lexer::SyntaxPart keyword;
 };
 
 struct KeywordsExpected {
-    std::vector<lexer::SyntaxPart::Type> options;
+    std::vector<lexer::SyntaxPart> options;
 };
 
 struct UnexpectedEndOfFile {};

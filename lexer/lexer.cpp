@@ -15,69 +15,69 @@ namespace lexer {
 
 namespace {
 
-const std::unordered_map<std::string_view, SyntaxPart::Type> kKeywordMap = [] { // NOLINT(cert-err58-cpp)
-    std::unordered_map<std::string_view, SyntaxPart::Type> map;
-    map["and"] = SyntaxPart::Type::And;
-    map["array"] = SyntaxPart::Type::Array;
-    map["begin"] = SyntaxPart::Type::Begin;
-    map["boolean"] = SyntaxPart::Type::Boolean;
-    map["else"] = SyntaxPart::Type::Else;
-    map["end"] = SyntaxPart::Type::End;
-    map["for"] = SyntaxPart::Type::For;
-    map["if"] = SyntaxPart::Type::If;
-    map["in"] = SyntaxPart::Type::In;
-    map["integer"] = SyntaxPart::Type::Integer;
-    map["is"] = SyntaxPart::Type::Is;
-    map["loop"] = SyntaxPart::Type::Loop;
-    map["not"] = SyntaxPart::Type::Not;
-    map["or"] = SyntaxPart::Type::Or;
-    map["print"] = SyntaxPart::Type::Print;
-    map["real"] = SyntaxPart::Type::Real;
-    map["record"] = SyntaxPart::Type::Record;
-    map["return"] = SyntaxPart::Type::Return;
-    map["reverse"] = SyntaxPart::Type::Reverse;
-    map["routine"] = SyntaxPart::Type::Routine;
-    map["then"] = SyntaxPart::Type::Then;
-    map["type"] = SyntaxPart::Type::Type;
-    map["var"] = SyntaxPart::Type::Var;
-    map["while"] = SyntaxPart::Type::While;
-    map["xor"] = SyntaxPart::Type::Xor;
+const std::unordered_map<std::string_view, SyntaxPart> kKeywordMap = [] { // NOLINT(cert-err58-cpp)
+    std::unordered_map<std::string_view, SyntaxPart> map;
+    map["and"] = SyntaxPart::And;
+    map["array"] = SyntaxPart::Array;
+    map["begin"] = SyntaxPart::Begin;
+    map["boolean"] = SyntaxPart::Boolean;
+    map["else"] = SyntaxPart::Else;
+    map["end"] = SyntaxPart::End;
+    map["for"] = SyntaxPart::For;
+    map["if"] = SyntaxPart::If;
+    map["in"] = SyntaxPart::In;
+    map["integer"] = SyntaxPart::Integer;
+    map["is"] = SyntaxPart::Is;
+    map["loop"] = SyntaxPart::Loop;
+    map["not"] = SyntaxPart::Not;
+    map["or"] = SyntaxPart::Or;
+    map["print"] = SyntaxPart::Print;
+    map["real"] = SyntaxPart::Real;
+    map["record"] = SyntaxPart::Record;
+    map["return"] = SyntaxPart::Return;
+    map["reverse"] = SyntaxPart::Reverse;
+    map["routine"] = SyntaxPart::Routine;
+    map["then"] = SyntaxPart::Then;
+    map["type"] = SyntaxPart::Type;
+    map["var"] = SyntaxPart::Var;
+    map["while"] = SyntaxPart::While;
+    map["xor"] = SyntaxPart::Xor;
     return map;
 }();
 
-std::optional<SyntaxPart::Type> findKeyword(std::string_view token) {
+std::optional<SyntaxPart> findKeyword(std::string_view token) {
     auto it = kKeywordMap.find(token);
     return it != kKeywordMap.end() ? std::optional{it->second} : std::nullopt;
 }
 
-const std::unordered_map<std::string_view, SyntaxPart::Type> kPunctuationMap = [] { // NOLINT(cert-err58-cpp)
-    std::unordered_map<std::string_view, SyntaxPart::Type> map;
-    map["=>"] = SyntaxPart::Type::Arrow;
-    map[":="] = SyntaxPart::Type::Assignment;
-    map["]"] = SyntaxPart::Type::CloseBracket;
-    map[")"] = SyntaxPart::Type::CloseParenthesis;
-    map[":"] = SyntaxPart::Type::Colon;
-    map[","] = SyntaxPart::Type::Comma;
-    map["/"] = SyntaxPart::Type::Divide;
-    map["."] = SyntaxPart::Type::Dot;
-    map["="] = SyntaxPart::Type::Equal;
-    map[">"] = SyntaxPart::Type::Greater;
-    map[">="] = SyntaxPart::Type::GreaterEqual;
-    map["<"] = SyntaxPart::Type::Less;
-    map["<="] = SyntaxPart::Type::LessEqual;
-    map["-"] = SyntaxPart::Type::Minus;
-    map["%"] = SyntaxPart::Type::Modulo;
-    map["*"] = SyntaxPart::Type::Multiply;
-    map["/="] = SyntaxPart::Type::NotEqual;
-    map["["] = SyntaxPart::Type::OpenBracket;
-    map["("] = SyntaxPart::Type::OpenParenthesis;
-    map["+"] = SyntaxPart::Type::Plus;
-    map[".."] = SyntaxPart::Type::Range;
-    map[";"] = SyntaxPart::Type::Semicolon;
+const std::unordered_map<std::string_view, SyntaxPart> kPunctuationMap = [] { // NOLINT(cert-err58-cpp)
+    std::unordered_map<std::string_view, SyntaxPart> map;
+    map["=>"] = SyntaxPart::Arrow;
+    map[":="] = SyntaxPart::Assignment;
+    map["]"] = SyntaxPart::CloseBracket;
+    map[")"] = SyntaxPart::CloseParenthesis;
+    map[":"] = SyntaxPart::Colon;
+    map[","] = SyntaxPart::Comma;
+    map["/"] = SyntaxPart::Divide;
+    map["."] = SyntaxPart::Dot;
+    map["="] = SyntaxPart::Equal;
+    map[">"] = SyntaxPart::Greater;
+    map[">="] = SyntaxPart::GreaterEqual;
+    map["<"] = SyntaxPart::Less;
+    map["<="] = SyntaxPart::LessEqual;
+    map["-"] = SyntaxPart::Minus;
+    map["%"] = SyntaxPart::Modulo;
+    map["*"] = SyntaxPart::Multiply;
+    map["/="] = SyntaxPart::NotEqual;
+    map["["] = SyntaxPart::OpenBracket;
+    map["("] = SyntaxPart::OpenParenthesis;
+    map["+"] = SyntaxPart::Plus;
+    map[".."] = SyntaxPart::Range;
+    map[";"] = SyntaxPart::Semicolon;
     return map;
 }();
 
-std::optional<SyntaxPart::Type> findPunctuation(std::string_view token) {
+std::optional<SyntaxPart> findPunctuation(std::string_view token) {
     auto it = kPunctuationMap.find(token);
     return it != kPunctuationMap.end() ? std::optional{it->second} : std::nullopt;
 }
@@ -197,7 +197,7 @@ auto Lexer::getNextToken() -> std::optional<ResultType> {
         if (cur_char == '\n' || cur_char == '\r') {
             ++line_no;
             ++char_pos;
-            return makeToken(token_start, SyntaxPart{SyntaxPart::Type::NewLine});
+            return makeToken(token_start, SyntaxPart{SyntaxPart::NewLine});
         }
         ++char_pos;
     }
