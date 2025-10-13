@@ -48,6 +48,10 @@ struct PrimaryExpressionExpected {};
 
 struct StringLiteralOrExpressionExpected {};
 
+struct DeclarationExpected {};
+
+struct SeparatorExpected {};
+
 struct SyntaxError {
     using Payload = std::variant<lexer::LexingError,
                                  KeywordExpected,
@@ -59,7 +63,9 @@ struct SyntaxError {
                                  LiteralExpected,
                                  NumberLiteralExpected,
                                  PrimaryExpressionExpected,
-                                 StringLiteralOrExpressionExpected>;
+                                 StringLiteralOrExpressionExpected,
+                                 DeclarationExpected,
+                                 SeparatorExpected>;
 
     std::optional<Span> span;
     Payload payload;

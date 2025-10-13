@@ -178,7 +178,7 @@ class Parser {
         while (true) {
             auto keywordE = assertKeywords<SyntaxPartType::Var, SyntaxPartType::Type, SyntaxPartType::Routine>();
             if (!keywordE && std::holds_alternative<UnexpectedEndOfFile>(keywordE.error().payload))
-                break;
+                return program;
             if (!keywordE)
                 return std::unexpected{std::move(keywordE).error()};
 
@@ -195,8 +195,11 @@ class Parser {
             } else {
                 std::unreachable();
             }
+
+            if (consumeSeparator())
+                continue;
+            return makeError(getLastSpan(), SeparatorExpected{});
         }
-        return program;
     }
 
     ParsingExpected<VariableDeclaration> parseVariableDeclaration() {
