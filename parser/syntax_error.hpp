@@ -19,8 +19,6 @@ struct KeywordsExpected {
     std::vector<lexer::SyntaxPart> options;
 };
 
-struct UnexpectedEndOfFile {};
-
 struct TokenExpected {
     std::string expected;
 
@@ -56,7 +54,6 @@ struct SyntaxError {
     using Payload = std::variant<lexer::LexingError,
                                  KeywordExpected,
                                  KeywordsExpected,
-                                 UnexpectedEndOfFile,
                                  TokenExpected,
                                  RoutineParamOrCloseParExpected,
                                  TypeExpected,

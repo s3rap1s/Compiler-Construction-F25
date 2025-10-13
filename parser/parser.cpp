@@ -93,8 +93,8 @@ class Parser {
         while (true) {
             if (next_token_it == std::default_sentinel) {
                 if (isSuccessfullEnd())
-                    return std::unexpected{SyntaxError{.span = getLastSpan(), .payload = UnexpectedEndOfFile{}}};
-                return std::unexpected{SyntaxError{.span = getLastSpan(), .payload = std::move(token_store->error())}};
+                    return makeError(getLastSpan(), TokenExpected{Proxy<T>{}});
+                return makeError(getLastSpan(), std::move(token_store->error()));
             }
 
             Token& t = *next_token_it;
@@ -177,7 +177,7 @@ class Parser {
         Program program;
         while (true) {
             auto keywordE = assertKeywords<SyntaxPart::Var, SyntaxPart::Type, SyntaxPart::Routine>();
-            if (!keywordE && std::holds_alternative<UnexpectedEndOfFile>(keywordE.error().payload))
+            if (!keywordE && isSuccessfullEnd())
                 return program;
             if (!keywordE)
                 return std::unexpected{std::move(keywordE).error()};
