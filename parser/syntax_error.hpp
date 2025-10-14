@@ -45,8 +45,6 @@ struct PrimaryExpressionExpected {};
 
 struct StringLiteralOrExpressionExpected {};
 
-struct DeclarationExpected {};
-
 struct SeparatorExpected {};
 
 struct SyntaxError {
@@ -60,7 +58,6 @@ struct SyntaxError {
                                  NumberLiteralExpected,
                                  PrimaryExpressionExpected,
                                  StringLiteralOrExpressionExpected,
-                                 DeclarationExpected,
                                  SeparatorExpected>;
 
     Span span;

@@ -14,10 +14,15 @@ using RealLiteral = lexer::RealLiteral;
 using BooleanLiteral = lexer::BooleanLiteral;
 struct RoutineCall;
 struct ModifiablePrimary;
-using Primary = std::variant<IntegerLiteral, RealLiteral, BooleanLiteral, RoutineCall, ModifiablePrimary>;
-
 struct Expression;
-using Factor = std::variant<Primary, std::unique_ptr<Expression>>;
+struct UnarySign;
+using Primary = std::variant<IntegerLiteral,
+                             RealLiteral,
+                             BooleanLiteral,
+                             RoutineCall,
+                             ModifiablePrimary,
+                             UnarySign,
+                             std::unique_ptr<Expression>>;
 
 struct RoutineCall {
     std::string name;
@@ -29,6 +34,16 @@ struct ModifiablePrimary { // NOLINT(*-special-member-*)
     std::vector<std::variant<Expression, std::string>> accessors;
 };
 
+struct UnarySign {
+    enum class Sign : char {
+        Plus,
+        Minus,
+    };
+
+    std::unique_ptr<Primary> operand;
+    Sign sign;
+};
+
 struct Summand {
     enum class Operation : char {
         Multiply,
@@ -36,8 +51,8 @@ struct Summand {
         Modulo,
     };
 
-    Factor first;
-    std::vector<std::pair<Operation, Factor>> rest;
+    Primary first; // same as Factor
+    std::vector<std::pair<Operation, Primary>> rest;
 };
 
 struct NumberExpression {
@@ -66,6 +81,12 @@ struct Relation {
     std::optional<std::pair<Operation, NumberExpression>> second;
 };
 
+struct NotExpression {
+    Primary operand;
+};
+
+using BooleanExpression = std::variant<Relation, NotExpression>;
+
 struct Expression {
     enum class Operation : char {
         And,
@@ -73,8 +94,8 @@ struct Expression {
         Xor,
     };
 
-    Relation first;
-    std::vector<std::pair<Operation, Relation>> rest;
+    BooleanExpression first;
+    std::vector<std::pair<Operation, BooleanExpression>> rest;
 };
 
 } // namespace parser

@@ -347,11 +347,11 @@ class Parser {
 
     ParsingExpected<Expression> parseExpression() {
         Expression expression;
-        BIND_SET(expression.first, parseRelation());
+        BIND_SET(expression.first, parseBooleanExpression());
 
         using SPT = SyntaxPart;
         while (auto op_keyword = consumeKeywords<SPT::And, SPT::Or, SPT::Xor>()) {
-            BIND(next, parseRelation());
+            BIND(next, parseBooleanExpression());
 
             using Op = Expression::Operation;
             using MapPair = std::pair<SPT, Op>;
@@ -364,9 +364,18 @@ class Parser {
         return expression;
     }
 
+    ParsingExpected<BooleanExpression> parseBooleanExpression() {
+        if (consumeKeyword<SyntaxPart::Not>()) {
+            BIND(operand, parsePrimary());
+            return NotExpression{std::move(operand)};
+        }
+        BIND(relation, parseRelation());
+        return std::move(relation);
+    }
+
     ParsingExpected<Relation> parseRelation() {
         Relation relation;
-        BIND_SET(relation.first, parseNumberExression());
+        BIND_SET(relation.first, parseNumberExpression());
 
         using SPT = SyntaxPart;
         if (auto op_keyword = consumeKeywords<SPT::Less,
@@ -375,7 +384,7 @@ class Parser {
                                               SPT::GreaterEqual,
                                               SPT::Equal,
                                               SPT::NotEqual>()) {
-            BIND(next, parseNumberExression());
+            BIND(next, parseNumberExpression());
 
             using Op = Relation::Operation;
             using MapPair = std::pair<SPT, Op>;
@@ -392,7 +401,7 @@ class Parser {
         return relation;
     }
 
-    ParsingExpected<NumberExpression> parseNumberExression() {
+    ParsingExpected<NumberExpression> parseNumberExpression() {
         NumberExpression expression;
         BIND_SET(expression.first, parseSummand());
 
@@ -411,25 +420,27 @@ class Parser {
     }
 
     ParsingExpected<Summand> parseSummand() {
-        Summand expression;
-        BIND_SET(expression.first, parseFactor());
+        Summand summand;
+        BIND_SET(summand.first, parsePrimary());
+
         using SPT = SyntaxPart;
         while (auto op_keyword = consumeKeywords<SPT::Multiply, SPT::Divide, SPT::Modulo>()) {
-            BIND(next, parseFactor());
+            BIND(next, parsePrimary());
+
             using Op = Summand::Operation;
             using MapPair = std::pair<SPT, Op>;
             static constexpr std::initializer_list<MapPair> map = {
                 {SPT::Multiply, Op::Multiply}, {SPT::Divide, Op::Divide}, {SPT::Modulo, Op::Modulo}};
             Op operation = std::ranges::find(map, *op_keyword, &MapPair::first)->second;
-            expression.rest.emplace_back(operation, std::move(next));
+
+            summand.rest.emplace_back(operation, std::move(next));
         }
-        return expression;
+        return summand;
     }
 
-    ParsingExpected<Factor> parseFactor() { // NOLINT(*complexity)
+    ParsingExpected<Primary> parsePrimary() { // NOLINT(*complexity)
         if (auto id = consumeToken<lexer::Identifier>()) {
-            BIND(op, (assertKeywords<SyntaxPart::Dot, SyntaxPart::OpenBracket, SyntaxPart::OpenParenthesis>()));
-            if (op == SyntaxPart::OpenParenthesis) {
+            if (assertKeyword<SyntaxPart::OpenParenthesis>()) {
                 BIND(call, parseRoutineCall(std::move(*id)));
                 return std::move(call);
             }
@@ -450,18 +461,10 @@ class Parser {
         if (auto lit = consumeLiteral<lexer::BooleanLiteral>())
             return lit;
 
-        if (consumeKeyword<SyntaxPart::Not>()) {
-            BIND(lit, consumeLiteral<lexer::IntegerLiteral>());
-            return BooleanLiteral{lit.value == 0};
-        }
-
         if (auto sign = consumeKeywords<SyntaxPart::Plus, SyntaxPart::Minus>()) {
-            bool minus = *sign == SyntaxPart::Minus;
-            if (auto lit = consumeLiteral<lexer::IntegerLiteral>())
-                return IntegerLiteral{minus ? -lit->value : lit->value};
-            if (auto lit = consumeLiteral<lexer::RealLiteral>())
-                return RealLiteral{minus ? -lit->value : lit->value};
-            return makeError(getLastSpan(), NumberLiteralExpected{});
+            BIND(operand, parsePrimary());
+            return UnarySign{.operand = std::make_unique<Primary>(std::move(operand)),
+                             .sign = *sign == SyntaxPart::Plus ? UnarySign::Sign::Plus : UnarySign::Sign::Minus};
         }
 
         return makeError(getLastSpan(), PrimaryExpressionExpected{});
