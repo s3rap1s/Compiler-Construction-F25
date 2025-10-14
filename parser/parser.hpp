@@ -8,6 +8,6 @@
 
 namespace parser {
 
-std::expected<Program, SyntaxError> parse(lexer::Lexer lexer);
+std::expected<Program, SyntaxError> parse(lexer::Lexer& lexer);
 
 } // namespace parser

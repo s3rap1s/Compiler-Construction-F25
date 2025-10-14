@@ -7,6 +7,7 @@
 #include <cstddef>
 #include <expected>
 #include <optional>
+#include <string>
 #include <string_view>
 #include <unordered_map>
 #include <utility>
@@ -85,11 +86,16 @@ std::optional<SyntaxPart> findPunctuation(std::string_view token) {
 } // namespace
 
 [[nodiscard]] Span Lexer::getCurrentSpan(std::size_t token_start) const {
-    return Span{.line_no = line_no, .begin = token_start, .end = char_pos};
+    return Span{.begin = token_start, .end = char_pos, .line_no = line_no, .column_no = column_no};
 }
 
 [[nodiscard]] Token Lexer::makeToken(std::size_t token_start, Token::Payload payload) const {
     return Token{getCurrentSpan(token_start), std::move(payload)};
+}
+
+void Lexer::advance() {
+    ++char_pos;
+    ++column_no;
 }
 
 auto Lexer::getNextToken() -> std::optional<ResultType> {
@@ -188,20 +194,25 @@ auto Lexer::getNextToken() -> std::optional<ResultType> {
         case State::StringLiteral:
             if (cur_char == '"') {
                 current_state = State::Start;
-                ++char_pos;
+                advance();
                 return makeToken(token_start, StringLiteral{std::move(buffer)});
             }
             buffer += cur_char;
             break;
         }
         if (cur_char == '\n' || cur_char == '\r') {
-            ++line_no;
             ++char_pos;
+            ++line_no;
+            column_no = 1;
             return makeToken(token_start, SyntaxPart{SyntaxPart::NewLine});
         }
-        ++char_pos;
+        advance();
     }
     // NOLINTEND(*bool-conversion*)
+}
+
+std::string&& Lexer::getProgramText() && {
+    return std::move(file);
 }
 
 } // namespace lexer

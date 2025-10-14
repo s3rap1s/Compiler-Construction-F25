@@ -23,12 +23,15 @@ class Lexer {
 
     State current_state = State::Start;
     std::size_t line_no = 1;
+    std::size_t column_no = 1;
     std::size_t char_pos = 0;
     std::string file;
 
     [[nodiscard]] Span getCurrentSpan(std::size_t token_start) const;
 
     [[nodiscard]] Token makeToken(std::size_t token_start, Token::Payload payload) const;
+
+    void advance();
 
   public:
     using ResultType = std::expected<Token, LexingError>;
@@ -37,6 +40,8 @@ class Lexer {
 
     // nullopt is end of stream
     std::optional<ResultType> getNextToken();
+
+    std::string&& getProgramText() &&;
 };
 
 } // namespace lexer

@@ -6,6 +6,7 @@
 #include <ranges>
 #include <span>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <variant>
 
@@ -50,9 +51,10 @@ std::string representListOfKeywords(std::span<const SyntaxPart> sps) {
     return sps | transform(representSyntaxPart) | join_with(", "sv) | std::ranges::to<std::string>();
 }
 
-void handleSyntaxError(const SyntaxError& error) {
+void handleSyntaxError(const SyntaxError& error, std::string_view filename, std::string_view program) {
     const Span& error_location = error.span;
-    logError("Error at {}:{}", error_location.line_no, error_location.begin);
+    std::string_view error_string = program.substr(error_location.begin, error_location.end - error_location.begin);
+    logError("Error at {}:{}:{}: {}", filename, error_location.line_no, error_location.column_no, error_string);
     std::visit(
         overloaded{
             [](const LexingError& e) { handleLexingError(e); },
@@ -86,6 +88,7 @@ int main(int argc, const char** argv) {
     }
 
     // read entire file into string
+    std::string_view filename = argv[1];
     std::fstream file{argv[1], file.in | file.ate};
     if (!file) {
         logError("Failed to open the file");
@@ -94,9 +97,10 @@ int main(int argc, const char** argv) {
     std::string program_text = readFile(file);
 
     Lexer lexer{std::move(program_text)};
-    std::expected<Program, SyntaxError> ast = parse(std::move(lexer));
+    std::expected<Program, SyntaxError> ast = parse(lexer);
     if (!ast) {
-        handleSyntaxError(ast.error());
+        program_text = std::move(lexer).getProgramText();
+        handleSyntaxError(ast.error(), filename, program_text);
         return EXIT_FAILURE;
     }
 

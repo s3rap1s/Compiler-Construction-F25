@@ -58,7 +58,7 @@ using SyntaxPart = lexer::SyntaxPart;
 
 // NOLINTBEGIN(*-no-recursion)
 class Parser {
-    lexer::Lexer lexer;
+    lexer::Lexer& lexer; // NOLINT(*ref-data*)
     std::optional<lexer::Lexer::ResultType> token_store = std::nullopt;
     lexer::TokenIterator next_token_it{lexer, token_store}; // initialize after lexer and token store
     Span last_span{};
@@ -652,7 +652,7 @@ class Parser {
     }
 
   public:
-    explicit Parser(lexer::Lexer lexer) : lexer{std::move(lexer)} {}
+    explicit Parser(lexer::Lexer& lexer) : lexer{lexer} {}
 
     std::expected<Program, SyntaxError> parse() {
         return parseProgram();
@@ -662,8 +662,8 @@ class Parser {
 
 } // namespace
 
-std::expected<Program, SyntaxError> parse(lexer::Lexer lexer) {
-    Parser parser{std::move(lexer)};
+std::expected<Program, SyntaxError> parse(lexer::Lexer& lexer) {
+    Parser parser{lexer};
     return parser.parse();
 }
 
