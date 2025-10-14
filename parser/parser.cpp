@@ -156,6 +156,7 @@ class Parser {
         ParsingExpected<lexer::Literal> lit = getToken<lexer::Literal>();
         if (!lit || !std::holds_alternative<T>(*lit))
             return makeError(getLastSpan(), LiteralExpected{Proxy<T>{}});
+        skipToken();
         return std::move(std::get<T>(*lit));
     }
 
@@ -417,12 +418,26 @@ class Parser {
     }
 
     ParsingExpected<Factor> parseFactor() { // NOLINT(*complexity)
+        if (auto id = consumeToken<lexer::Identifier>()) {
+            BIND(op, (assertKeywords<SyntaxPart::Dot, SyntaxPart::OpenBracket, SyntaxPart::OpenParenthesis>()));
+            if (op == SyntaxPart::OpenParenthesis) {
+                BIND(call, parseRoutineCall(std::move(*id)));
+                return std::move(call);
+            }
+            BIND(modifyable, parseModifablePrimary(std::move(*id)));
+            return std::move(modifyable);
+        }
+
         if (consumeKeyword<SyntaxPart::OpenParenthesis>()) {
             BIND(expr, parseExpression());
             BIND_VOID(consumeKeyword<SyntaxPart::CloseParenthesis>());
             return std::make_unique<Expression>(std::move(expr));
         }
 
+        if (auto lit = consumeLiteral<lexer::IntegerLiteral>())
+            return lit;
+        if (auto lit = consumeLiteral<lexer::RealLiteral>())
+            return lit;
         if (auto lit = consumeLiteral<lexer::BooleanLiteral>())
             return lit;
 
@@ -438,17 +453,6 @@ class Parser {
             if (auto lit = consumeLiteral<lexer::RealLiteral>())
                 return RealLiteral{minus ? -lit->value : lit->value};
             return makeError(getLastSpan(), NumberLiteralExpected{});
-        }
-
-        if (auto id = consumeToken<lexer::Identifier>()) {
-            BIND(op,
-                 (assertKeywords<SyntaxPart::Dot, SyntaxPart::OpenBracket, SyntaxPart::OpenParenthesis>()));
-            if (op == SyntaxPart::OpenParenthesis) {
-                BIND(call, parseRoutineCall(std::move(*id)));
-                return std::move(call);
-            }
-            BIND(modifyable, parseModifablePrimary(std::move(*id)));
-            return std::move(modifyable);
         }
 
         return makeError(getLastSpan(), PrimaryExpressionExpected{});
@@ -498,9 +502,8 @@ class Parser {
                 if (assertSeparator() || assertKeyword<SyntaxPart::OpenParenthesis>()) {
                     BIND(call, parseRoutineCall(std::move(*id)));
                     block.emplace_back(std::move(call));
-                } else if (auto op = assertKeywords<SyntaxPart::Assignment,
-                                                    SyntaxPart::Dot,
-                                                    SyntaxPart::OpenBracket>()) {
+                } else if (auto op =
+                               assertKeywords<SyntaxPart::Assignment, SyntaxPart::Dot, SyntaxPart::OpenBracket>()) {
                     BIND(assignment, parseAssignment(std::move(*id)));
                     block.emplace_back(std::move(assignment));
                 } else {
@@ -520,26 +523,32 @@ class Parser {
                 case SyntaxPart::Var: {
                     BIND(var_declaration, parseVariableDeclaration());
                     block.emplace_back(std::move(var_declaration));
+                    break;
                 }
                 case SyntaxPart::Type: {
                     BIND(type_declaration, parseTypeDeclaration());
                     block.emplace_back(std::move(type_declaration));
+                    break;
                 }
                 case SyntaxPart::While: {
                     BIND(while_loop, parseWhileLoop());
                     block.emplace_back(std::move(while_loop));
+                    break;
                 }
                 case SyntaxPart::For: {
                     BIND(for_loop, parseForLoop());
                     block.emplace_back(std::move(for_loop));
+                    break;
                 }
                 case SyntaxPart::If: {
                     BIND(if_statement, parseIfStatement());
                     block.emplace_back(std::move(if_statement));
+                    break;
                 }
                 case SyntaxPart::Print: {
                     BIND(print, parsePrintStatement());
                     block.emplace_back(std::move(print));
+                    break;
                 }
                 default:
                     std::unreachable();

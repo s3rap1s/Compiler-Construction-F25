@@ -4,7 +4,6 @@
 #include "lexer/tokens.hpp"
 #include "utils.hpp"
 
-#include <optional>
 #include <string>
 #include <variant>
 #include <vector>
@@ -64,7 +63,7 @@ struct SyntaxError {
                                  DeclarationExpected,
                                  SeparatorExpected>;
 
-    std::optional<Span> span;
+    Span span;
     Payload payload;
 };
 

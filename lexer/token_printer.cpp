@@ -67,45 +67,13 @@ constexpr std::array kSyntaxPartSpellings = [] {
     return map;
 }();
 
-bool isPunctuation(SyntaxPart type) {
-    switch (type) {
-    case SyntaxPart::Arrow:
-    case SyntaxPart::Assignment:
-    case SyntaxPart::CloseBracket:
-    case SyntaxPart::CloseParenthesis:
-    case SyntaxPart::Colon:
-    case SyntaxPart::Comma:
-    case SyntaxPart::Divide:
-    case SyntaxPart::Dot:
-    case SyntaxPart::Equal:
-    case SyntaxPart::Greater:
-    case SyntaxPart::GreaterEqual:
-    case SyntaxPart::Less:
-    case SyntaxPart::LessEqual:
-    case SyntaxPart::Minus:
-    case SyntaxPart::Modulo:
-    case SyntaxPart::Multiply:
-    case SyntaxPart::NotEqual:
-    case SyntaxPart::OpenBracket:
-    case SyntaxPart::OpenParenthesis:
-    case SyntaxPart::Plus:
-    case SyntaxPart::Range:
-    case SyntaxPart::Semicolon:
-        return true;
-    default:
-        return false;
-    }
-}
-
 } // namespace
 
 std::string representSyntaxPart(SyntaxPart sp) {
     std::string repr;
-    if (!isPunctuation(sp))
-        repr += '<';
-    repr += kSyntaxPartSpellings[static_cast<std::size_t>(sp)];
-    if (!isPunctuation(sp))
-        repr += '>';
+    repr += '\'';
+    repr += getSyntaxPartSpelling(sp);
+    repr += '\'';
     return repr;
 }
 
@@ -127,6 +95,10 @@ std::string representToken(const Token& token) {
         [](const Literal& lit) { return representLiteral(lit); },
     };
     return std::visit(matcher, token.payload);
+}
+
+std::string_view getSyntaxPartSpelling(SyntaxPart sp) {
+    return kSyntaxPartSpellings[static_cast<std::size_t>(sp)];
 }
 
 void print(const Token& token) {
