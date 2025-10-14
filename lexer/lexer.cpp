@@ -86,7 +86,7 @@ std::optional<SyntaxPart> findPunctuation(std::string_view token) {
 } // namespace
 
 [[nodiscard]] Span Lexer::getCurrentSpan(std::size_t token_start) const {
-    return Span{.begin = token_start, .end = char_pos, .line_no = line_no, .column_no = column_no};
+    return Span{.begin = token_start, .end = char_pos, .line_no = line_no, .column_no = token_start - line_start + 1};
 }
 
 [[nodiscard]] Token Lexer::makeToken(std::size_t token_start, Token::Payload payload) const {
@@ -95,7 +95,6 @@ std::optional<SyntaxPart> findPunctuation(std::string_view token) {
 
 void Lexer::advance() {
     ++char_pos;
-    ++column_no;
 }
 
 auto Lexer::getNextToken() -> std::optional<ResultType> {
@@ -134,11 +133,10 @@ auto Lexer::getNextToken() -> std::optional<ResultType> {
                 buffer += cur_char;
             } else {
                 current_state = State::Start;
-                if (auto token_code = findKeyword(buffer)) {
-                    if (buffer == "true" || buffer == "false")
-                        return makeToken(token_start, BooleanLiteral{buffer == "true"});
+                if (buffer == "true" || buffer == "false")
+                    return makeToken(token_start, BooleanLiteral{buffer == "true"});
+                if (auto token_code = findKeyword(buffer))
                     return makeToken(token_start, SyntaxPart{*token_code});
-                }
                 return makeToken(token_start, Identifier{std::move(buffer)});
             }
             break;
@@ -203,7 +201,7 @@ auto Lexer::getNextToken() -> std::optional<ResultType> {
         if (cur_char == '\n' || cur_char == '\r') {
             ++char_pos;
             ++line_no;
-            column_no = 1;
+            line_start = char_pos;
             return makeToken(token_start, SyntaxPart{SyntaxPart::NewLine});
         }
         advance();

@@ -62,12 +62,18 @@ class Parser {
     std::optional<lexer::Lexer::ResultType> token_store = std::nullopt;
     lexer::TokenIterator next_token_it{lexer, token_store}; // initialize after lexer and token store
     Span last_span{};
+    bool newline_encountered = false;
 
     template <typename T>
     using ParsingExpected = std::expected<T, SyntaxError>;
 
     void skipToken() {
+        newline_encountered = false;
         last_span = next_token_it->span;
+        ++next_token_it;
+    }
+
+    void skipNewline() {
         ++next_token_it;
     }
 
@@ -99,7 +105,8 @@ class Parser {
 
             Token& t = *next_token_it;
             if (auto* sp = std::get_if<lexer::SyntaxPart>(&t.payload); sp && *sp == SyntaxPart::NewLine) {
-                skipToken();
+                newline_encountered = true;
+                skipNewline();
                 continue;
             }
             if (!std::holds_alternative<T>(t.payload))
@@ -161,15 +168,17 @@ class Parser {
     }
 
     [[nodiscard]] bool assertSeparator() const {
+        if (newline_encountered)
+            return true;
         if (next_token_it == std::default_sentinel)
             return false;
-        const auto* sp = std::get_if<lexer::SyntaxPart>(&next_token_it->payload);
+        const lexer::SyntaxPart* sp = std::get_if<lexer::SyntaxPart>(&next_token_it->payload);
         return sp != nullptr && (*sp == SyntaxPart::NewLine || *sp == SyntaxPart::Semicolon);
     }
 
     bool consumeSeparator() {
         bool found = assertSeparator();
-        if (found)
+        if (found && !newline_encountered)
             skipToken();
         return found;
     }

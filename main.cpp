@@ -1,3 +1,4 @@
+#include <cstddef>
 #include <cstdlib>
 #include <format>
 #include <fstream>
@@ -33,14 +34,19 @@ std::string readFile(std::fstream& file) {
 
 template <typename... Args>
 void logError(std::format_string<Args...> format, Args&&... args) {
+    std::print(format, std::forward<Args>(args)...);
+}
+
+template <typename... Args>
+void logErrorLn(std::format_string<Args...> format, Args&&... args) {
     std::println(format, std::forward<Args>(args)...);
 }
 
 void handleLexingError(const LexingError& error) {
     std::visit(overloaded{
-                   [](const IntegerLiteralError& e) { logError("Wrong integer literal: {}", e.literal); },
-                   [](const RealLiteralError& e) { logError("Wrong real literal: {}", e.literal); },
-                   [](const UnknownToken& e) { logError("Unknown token: {}", e.token); },
+                   [](const IntegerLiteralError& e) { logErrorLn("Wrong integer literal: {}", e.literal); },
+                   [](const RealLiteralError& e) { logErrorLn("Wrong real literal: {}", e.literal); },
+                   [](const UnknownToken& e) { logErrorLn("Unknown token: {}", e.token); },
                },
                error);
 }
@@ -52,38 +58,44 @@ std::string representListOfKeywords(std::span<const SyntaxPart> sps) {
 }
 
 void handleSyntaxError(const SyntaxError& error, std::string_view filename, std::string_view program) {
+    using namespace std::views;
+
     const Span& error_location = error.span;
-    std::string_view error_string = program.substr(error_location.begin, error_location.end - error_location.begin);
-    logError("Error at {}:{}:{}: {}", filename, error_location.line_no, error_location.column_no, error_string);
+    logError("{}:{}:{}: error: ", filename, error_location.line_no, error_location.column_no);
     std::visit(
         overloaded{
             [](const LexingError& e) { handleLexingError(e); },
-            [](const KeywordExpected& e) { logError("Expected {}", representSyntaxPart(e.keyword)); },
-            [](const KeywordsExpected& e) { logError("Expected one of: {}", representListOfKeywords(e.options)); },
-            [](const TokenExpected& e) { logError("Expected {}", e.expected); },
+            [](const KeywordExpected& e) { logErrorLn("Expected {}", representSyntaxPart(e.keyword)); },
+            [](const KeywordsExpected& e) { logErrorLn("Expected one of: {}", representListOfKeywords(e.options)); },
+            [](const TokenExpected& e) { logErrorLn("Expected {}", e.expected); },
             [](const RoutineParamOrCloseParExpected&) {
                 std::println(stderr,
                              "Expected a parameter declaration or {}",
                              representSyntaxPart(SyntaxPart::CloseParenthesis));
             },
-            [](const TypeExpected&) { logError("Expected a type"); },
-            [](const LiteralExpected& e) { logError("Expected {} literal", e.expected); },
-            [](const NumberLiteralExpected&) { logError("Expected a number literal"); },
-            [](const PrimaryExpressionExpected&) { logError("Expected an expression"); },
-            [](const StringLiteralOrExpressionExpected&) { logError("Expected a string or an expression"); },
-            [](const DeclarationExpected&) { logError("Expected a declaration"); },
+            [](const TypeExpected&) { logErrorLn("Expected a type"); },
+            [](const LiteralExpected& e) { logErrorLn("Expected {} literal", e.expected); },
+            [](const NumberLiteralExpected&) { logErrorLn("Expected a number literal"); },
+            [](const PrimaryExpressionExpected&) { logErrorLn("Expected an expression"); },
+            [](const StringLiteralOrExpressionExpected&) { logErrorLn("Expected a string or an expression"); },
             [](const SeparatorExpected&) {
-                logError("Expected a newline or {}", representSyntaxPart(SyntaxPart::Semicolon));
+                logErrorLn("Expected a newline or {}", representSyntaxPart(SyntaxPart::Semicolon));
             },
         },
         error.payload);
+
+    const std::size_t line_start = error_location.begin - (error_location.column_no - 1);
+    const std::size_t error_length = error_location.end - error_location.begin;
+    logErrorLn("    | {:s}",
+               program.substr(line_start) | take_while([](char ch) static { return ch != '\n' && ch != '\r'; }));
+    logErrorLn("    | {:s}^{:s}", repeat(' ', error_location.column_no - 1), repeat('~', error_length - 1));
 }
 
 } // namespace
 
 int main(int argc, const char** argv) {
     if (argc < 2) {
-        logError("Specify a file to analyze");
+        logErrorLn("Specify a file to analyze");
         return EXIT_FAILURE;
     }
 
@@ -91,7 +103,7 @@ int main(int argc, const char** argv) {
     std::string_view filename = argv[1];
     std::fstream file{argv[1], file.in | file.ate};
     if (!file) {
-        logError("Failed to open the file");
+        logErrorLn("Failed to open the file");
         return EXIT_FAILURE;
     }
     std::string program_text = readFile(file);

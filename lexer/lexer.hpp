@@ -23,7 +23,7 @@ class Lexer {
 
     State current_state = State::Start;
     std::size_t line_no = 1;
-    std::size_t column_no = 1;
+    std::size_t line_start = 0;
     std::size_t char_pos = 0;
     std::string file;
 
