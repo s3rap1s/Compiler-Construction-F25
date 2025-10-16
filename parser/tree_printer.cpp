@@ -29,6 +29,7 @@ class TreePrinter {
         if (!compact_mode) {
             out << "\n";
         }
+        out << "\n";
     }
 
 public:
@@ -154,7 +155,7 @@ public:
 
     // Expressions
     void print(const parser::Expression& expr) {
-        if (compact_mode) {
+        if (false) {
             print(expr.first);
             for (const auto& [op, bool_expr] : expr.rest) {
                 switch (op) {
@@ -196,7 +197,7 @@ public:
     }
 
     void print(const parser::Relation& relation) {
-        if (compact_mode) {
+        if (false) {
             print(relation.first);
             if (relation.second) {
                 switch (relation.second->first) {
@@ -240,7 +241,7 @@ public:
     }
 
     void print(const parser::NotExpression& not_expr) {
-        if (compact_mode) {
+        if (false) {
             out << "NOT ";
             print(not_expr.operand);
         } else {
@@ -255,7 +256,7 @@ public:
     }
 
     void print(const parser::NumberExpression& num_expr) {
-        if (compact_mode) {
+        if (false) {
             print(num_expr.first);
             for (const auto& [op, summand] : num_expr.rest) {
                 switch (op) {
@@ -291,7 +292,7 @@ public:
     }
 
     void print(const parser::Summand& summand) {
-        if (compact_mode) {
+        if (false) {
             print(summand.first);
             for (const auto& [op, primary] : summand.rest) {
                 switch (op) {
@@ -357,7 +358,7 @@ public:
     }
 
     void print(const parser::ModifiablePrimary& mp) {
-        out << mp.variable;
+        out << "Identifier " << mp.variable;
         for (const auto& accessor : mp.accessors) {
             std::visit([this](const auto& acc) {
                 using T = std::decay_t<decltype(acc)>;
