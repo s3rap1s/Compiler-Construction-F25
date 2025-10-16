@@ -15,7 +15,7 @@ struct VariableDeclaration {
     std::string identifier;
     std::optional<Type> type;
     std::optional<Expression> value;
-    // mamoi klyanus', ne budet dva optional pustimi. c Maxim Fomin
+    // mamoi klyanus', ne budet dva optional pustimi. (c) Maxim Fomin
 };
 
 struct ParameterDecalration {

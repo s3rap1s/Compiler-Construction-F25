@@ -393,7 +393,7 @@ class Parser {
                                                                    {SPT::Greater, Op::Greater},
                                                                    {SPT::GreaterEqual, Op::GreaterOrEqual},
                                                                    {SPT::Equal, Op::Equal},
-                                                                   {SPT::Equal, Op::Equal}};
+                                                                   {SPT::NotEqual, Op::NotEqual}};
             Op op = std::ranges::find(map, *op_keyword, &MapPair::first)->second;
 
             relation.second = {op, std::move(next)};

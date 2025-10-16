@@ -16,7 +16,10 @@
 #include "lexer/token_printer.hpp"
 #include "lexer/tokens.hpp"
 #include "parser/parser.hpp"
+#include "parser/tree_printer.hpp"
 #include "parser/syntax_error.hpp"
+
+
 #include "utils.hpp"
 
 using namespace lexer;
@@ -116,5 +119,7 @@ int main(int argc, const char** argv) {
         return EXIT_FAILURE;
     }
 
-    std::println("ok");
+    print_tree(*ast);
+    
+    return EXIT_SUCCESS;
 }
