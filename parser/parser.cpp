@@ -230,9 +230,9 @@ class Parser {
         }
 
         return VariableDeclaration{
-            .identifier = std::move(id).name,
-            .type = std::move(type),
-            .value = std::move(init_value),
+            std::move(id).name,
+            std::move(type),
+            std::move(init_value),
         };
     }
 
@@ -331,7 +331,7 @@ class Parser {
         BIND(type, parseType());
         return ArrayType{
             .size = std::move(size),
-            .element_type = std::make_unique<Type>(std::move(type)),
+            .element_type = std::make_shared<Type>(std::move(type)),
         };
     }
 
@@ -340,7 +340,7 @@ class Parser {
         RecordType record;
         while (!consumeKeyword<SyntaxPart::End>()) {
             BIND(var, parseVariableDeclaration());
-            record.fields.push_back(std::move(var));
+            record.fields.push_back(std::make_shared<VariableDeclaration>(var));
         }
         return record;
     }
@@ -451,7 +451,7 @@ class Parser {
         if (consumeKeyword<SyntaxPart::OpenParenthesis>()) {
             BIND(expr, parseExpression());
             BIND_VOID(consumeKeyword<SyntaxPart::CloseParenthesis>());
-            return std::make_unique<Expression>(std::move(expr));
+            return std::make_shared<Expression>(std::move(expr));
         }
 
         if (auto lit = consumeLiteral<lexer::IntegerLiteral>())
@@ -463,7 +463,7 @@ class Parser {
 
         if (auto sign = consumeKeywords<SyntaxPart::Plus, SyntaxPart::Minus>()) {
             BIND(operand, parsePrimary());
-            return UnarySign{.operand = std::make_unique<Primary>(std::move(operand)),
+            return UnarySign{.operand = std::make_shared<Primary>(std::move(operand)),
                              .sign = *sign == SyntaxPart::Plus ? UnarySign::Sign::Plus : UnarySign::Sign::Minus};
         }
 

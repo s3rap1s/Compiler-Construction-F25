@@ -97,7 +97,7 @@ void Lexer::advance() {
     ++char_pos;
 }
 
-auto Lexer::getNextToken() -> std::optional<ResultType> {
+auto Lexer::getNextToken() -> std::optional<ResultType> { // NOLINT(*complexity*)
     // NOLINTBEGIN(*bool-conversion*)
     if (char_pos == file.size())
         return std::nullopt;

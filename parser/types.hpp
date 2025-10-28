@@ -19,12 +19,15 @@ using Type = std::variant<IntegerType, RealType, BoolType, RecordType, ArrayType
 
 struct VariableDeclaration;
 struct RecordType {
-    std::vector<VariableDeclaration> fields;
+    std::vector<std::shared_ptr<VariableDeclaration>> fields;
+
+    RecordType() = default;
+    explicit RecordType(std::vector<std::shared_ptr<VariableDeclaration>>&& fields);
 };
 
 struct ArrayType {
     std::optional<Expression> size;
-    std::unique_ptr<Type> element_type;
+    std::shared_ptr<Type> element_type;
 };
 
 } // namespace parser

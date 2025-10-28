@@ -6,6 +6,7 @@
 
 #include <optional>
 #include <string>
+#include <utility>
 #include <variant>
 #include <vector>
 
@@ -16,6 +17,12 @@ struct VariableDeclaration {
     std::optional<Type> type;
     std::optional<Expression> value;
     // mamoi klyanus', ne budet dva optional pustimi. (c) Maxim Fomin
+
+    VariableDeclaration() = default;
+
+    template<typename T, typename E>
+    VariableDeclaration(std::string identifier, T&& type, E&& value) : 
+        identifier(std::move(identifier)), type(std::forward<T>(type)), value(std::forward<E>(value)) {}
 };
 
 struct ParameterDecalration {
