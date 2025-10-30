@@ -1,6 +1,7 @@
 #pragma once
 
 #include "lexer/tokens.hpp"
+#include "parser/ast.hpp"
 
 #include <memory>
 #include <optional>
@@ -24,17 +25,17 @@ using Primary = std::variant<IntegerLiteral,
                              UnarySign,
                              std::shared_ptr<Expression>>;
 
-struct RoutineCall {
+struct RoutineCall : AstNode {
     std::string name;
     std::vector<Expression> arguments;
 };
 
-struct ModifiablePrimary { // NOLINT(*-special-member-*)
+struct ModifiablePrimary : AstNode { // NOLINT(*-special-member-*)
     std::string variable;
     std::vector<std::variant<Expression, std::string>> accessors;
 };
 
-struct UnarySign {
+struct UnarySign : AstNode {
     enum class Sign : char {
         Plus,
         Minus,
@@ -44,7 +45,7 @@ struct UnarySign {
     Sign sign;
 };
 
-struct Summand {
+struct Summand : AstNode {
     enum class Operation : char {
         Multiply,
         Divide,
@@ -55,7 +56,7 @@ struct Summand {
     std::vector<std::pair<Operation, Primary>> rest;
 };
 
-struct NumberExpression {
+struct NumberExpression : AstNode { //NOLINT(*init*)
     enum class Operation : char {
         Plus,
         Minus,
@@ -64,10 +65,10 @@ struct NumberExpression {
     Summand first;
     std::vector<std::pair<Operation, Summand>> rest;
 
-    NumberExpression() = default; // Explicit default constructor keeps the Clang/Clangd problem away
+    NumberExpression() = default; // Explicit default constructor keeps the Clang/Clangd problem away // NOLINT
 };
 
-struct Relation {
+struct Relation : AstNode {
     enum class Operation : char {
         Less,
         LessOrEqual,
@@ -81,13 +82,13 @@ struct Relation {
     std::optional<std::pair<Operation, NumberExpression>> second;
 };
 
-struct NotExpression {
+struct NotExpression : AstNode {
     Primary operand;
 };
 
 using BooleanExpression = std::variant<Relation, NotExpression>;
 
-struct Expression {
+struct Expression : AstNode {
     enum class Operation : char {
         And,
         Or,

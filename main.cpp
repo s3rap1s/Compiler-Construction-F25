@@ -11,14 +11,16 @@
 #include <utility>
 #include <variant>
 
+#include "analyzer/semantic_error.hpp"
+#include "analyzer/analyzer.hpp"
 #include "lexer/lexer.hpp"
 #include "lexer/lexing_error.hpp"
 #include "lexer/token_printer.hpp"
 #include "lexer/tokens.hpp"
+#include "parser/declarations.hpp"
 #include "parser/parser.hpp"
 #include "parser/syntax_error.hpp"
 #include "parser/tree_printer.hpp"
-
 
 #include "utils.hpp"
 
@@ -119,7 +121,15 @@ int main(int argc, const char** argv) {
         return EXIT_FAILURE;
     }
 
-    print_tree(*ast);
+    // print_tree(*ast);
+    
+    std::expected<Program, analyzer::SemanticError> analysis_result = analyzer::analyze(*ast);
+    if (!analysis_result) {
+        program_text = std::move(lexer).getProgramText();
+        std::cout << analysis_result.error().what;
+        // handleSemanticError(analysis_result.error(), filename, program_text);
+        return EXIT_FAILURE;
+    }
     
     return EXIT_SUCCESS;
 }

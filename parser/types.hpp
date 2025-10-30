@@ -1,6 +1,7 @@
 #pragma once
 
 #include "parser/expressions.hpp"
+#include "parser/ast.hpp"
 
 #include <memory>
 #include <optional>
@@ -10,22 +11,19 @@
 
 namespace parser {
 
-struct IntegerType {};
-struct RealType {};
-struct BoolType {};
+struct IntegerType : AstNode {};
+struct RealType : AstNode {};
+struct BoolType : AstNode {};
 struct RecordType;
 struct ArrayType;
 using Type = std::variant<IntegerType, RealType, BoolType, RecordType, ArrayType, std::string>;
 
 struct VariableDeclaration;
-struct RecordType {
+struct RecordType : AstNode {
     std::vector<std::shared_ptr<VariableDeclaration>> fields;
-
-    RecordType() = default;
-    explicit RecordType(std::vector<std::shared_ptr<VariableDeclaration>>&& fields);
 };
 
-struct ArrayType {
+struct ArrayType : AstNode {
     std::optional<Expression> size;
     std::shared_ptr<Type> element_type;
 };

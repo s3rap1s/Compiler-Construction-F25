@@ -23,34 +23,34 @@ using Block = std::vector<std::variant<VariableDeclaration, TypeDeclaration, Sta
 
 using StringLiteral = lexer::StringLiteral;
 
-struct AssignmentStatement {
+struct AssignmentStatement : AstNode { //NOLINT(*init*)
     ModifiablePrimary target;
     Expression expression;
 };
 
-struct IfStatement {
+struct IfStatement : AstNode {
     Expression condition;
     Block true_branch;
     std::optional<Block> false_branch;
 };
 
-struct WhileStatement {
+struct WhileStatement : AstNode {
     Expression condition;
     Block body;
 };
 
-struct ForStatement {
+struct ForStatement : AstNode {
     std::string counter;
     std::variant<Expression, std::pair<Expression, Expression>> range;
     Block body;
     bool is_reversed;
 };
 
-struct PrintStatement {
+struct PrintStatement : AstNode {
     std::vector<std::variant<Expression, StringLiteral>> arguments;
 };
 
-struct ReturnStatement {
+struct ReturnStatement : AstNode { //NOLINT(*init*)
     std::optional<Expression> value;
 };
 

@@ -7,6 +7,6 @@
 
 namespace analyzer {
 
-std::expected<parser::Program, SemanticError> parse(parser::Program ast);
+std::expected<parser::Program, SemanticError> analyze(parser::Program& ast);
 
 } // namespace analyzer

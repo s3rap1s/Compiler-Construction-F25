@@ -27,6 +27,8 @@ add_executable(main
     parser/syntax_error.cpp
     parser/tree_printer.cpp
 
+    analyzer/analyzer.cpp
+
     main.cpp
 )
 

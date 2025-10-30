@@ -43,10 +43,7 @@ public:
         *out << "VariableDeclaration: " << decl.identifier;
         if (decl.type) {
             *out << " : ";
-            indent_level++;
-            newline();
             print(*decl.type);
-            indent_level--;
         }
         if (decl.value) {
             *out << " = ";
