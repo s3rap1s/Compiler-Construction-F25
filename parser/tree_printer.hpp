@@ -2,7 +2,7 @@
 
 #include "parser/declarations.hpp"
 
-#include <ostream>
+#include <iostream>
 
 namespace parser {
 
