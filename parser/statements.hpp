@@ -14,7 +14,8 @@ struct WhileStatement;
 struct ForStatement;
 struct IfStatement;
 struct PrintStatement;
-using Statement = std::variant<AssignmentStatement, RoutineCall, WhileStatement, ForStatement, IfStatement, PrintStatement>;
+struct ReturnStatement;
+using Statement = std::variant<AssignmentStatement, RoutineCall, WhileStatement, ForStatement, IfStatement, PrintStatement, ReturnStatement>;
 
 struct VariableDeclaration;
 struct TypeDeclaration;
@@ -47,6 +48,10 @@ struct ForStatement {
 
 struct PrintStatement {
     std::vector<std::variant<Expression, StringLiteral>> arguments;
+};
+
+struct ReturnStatement {
+    std::optional<Expression> value;
 };
 
 } // namespace parser

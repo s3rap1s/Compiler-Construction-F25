@@ -19,7 +19,7 @@ class TreePrinter {
 
     void print_indent() {
         for (int i = 0; i < indent_level; ++i) {
-            *out << "  ";
+            *out << "   ";
         }
     }
 
@@ -124,6 +124,7 @@ public:
                 }
                 newline();
             }
+            print_indent();
             *out << "}";
         }
         newline();
@@ -458,6 +459,18 @@ public:
         indent_level--;
     }
 
+    void print(const parser::ReturnStatement& return_stmt) {
+        print_indent();
+        *out << "Return";
+        if (return_stmt.value) {
+            *out << ": ";
+            newline();
+            indent_level++;
+            print(*return_stmt.value);
+            indent_level--;
+        }
+    }
+
     void print(const parser::StringLiteral& str_lit) {
         *out << "StringLiteral(\"" << str_lit.value << "\")";
     }
@@ -467,7 +480,7 @@ public:
 
 namespace parser {
 
-void print_tree(const Program& program, std::ostream* out = &std::cout) {
+void print_tree(const Program& program, std::ostream* out = &std::cout) { // NOLINT
     TreePrinter printer(out);
     printer.print(program);
 }

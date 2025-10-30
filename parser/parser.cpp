@@ -270,7 +270,7 @@ class Parser {
             BIND_SET(return_type, parseType());
 
         std::optional<std::variant<Block, Expression>> body;
-        BIND(keyword, (consumeKeywords<SyntaxPart::Is, SyntaxPart::End>()));
+        BIND(keyword, (consumeKeywords<SyntaxPart::Is, SyntaxPart::Arrow>()));
         if (keyword == SyntaxPart::Is) {
             BIND_SET(body, parseBlock());
             BIND_VOID(consumeKeyword<SyntaxPart::End>());
@@ -530,7 +530,8 @@ class Parser {
                                                      SyntaxPart::While,
                                                      SyntaxPart::For,
                                                      SyntaxPart::If,
-                                                     SyntaxPart::Print>()) {
+                                                     SyntaxPart::Print,
+                                                     SyntaxPart::Return>()) {
                 switch (*keyword) {
                 case SyntaxPart::Var: {
                     BIND(var_declaration, parseVariableDeclaration());
@@ -560,6 +561,11 @@ class Parser {
                 case SyntaxPart::Print: {
                     BIND(print, parsePrintStatement());
                     block.emplace_back(std::move(print));
+                    break;
+                }
+                case SyntaxPart::Return: {
+                    BIND(return_statement, parseReturnStatement());
+                    block.emplace_back(std::move(return_statement));
                     break;
                 }
                 default:
@@ -661,6 +667,16 @@ class Parser {
                 return makeError(getLastSpan(), StringLiteralOrExpressionExpected{});
         }
         return print;
+    }
+
+    ParsingExpected<ReturnStatement> parseReturnStatement() {
+        BIND_VOID(consumeKeyword<SyntaxPart::Return>());
+
+        std::optional<Expression> value;
+        if (!assertSeparator()) {
+            BIND_SET(value, parseExpression());
+        }
+        return ReturnStatement{.value = std::move(value)};
     }
 
   public:
