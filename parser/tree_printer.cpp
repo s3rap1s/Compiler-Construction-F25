@@ -1,3 +1,5 @@
+#include "tree_printer.hpp"
+
 #include "parser/declarations.hpp"
 #include "parser/expressions.hpp"
 #include "parser/statements.hpp"
@@ -27,13 +29,13 @@ class TreePrinter {
         out << "\n";
     }
 
-public:
-    explicit TreePrinter(std::ostream& output_stream) : out(output_stream) {}
+  public:
+    explicit TreePrinter(std::ostream& output_stream = std::cout) : out{output_stream} {}
 
     // Program
     void print(const parser::Program& program) {
         for (const auto& decl : program.declarations) {
-            std::visit([this](const auto& d) { this->print(d); }, decl);
+            std::visit([this](const auto& d) { this->printDeduced(d); }, decl);
         }
     }
 
@@ -43,13 +45,13 @@ public:
         out << "VariableDeclaration: " << decl.identifier;
         if (decl.type) {
             out << " : ";
-            print(*decl.type);
+            printDeduced(*decl.type);
         }
         if (decl.value) {
             out << " = ";
             indent_level++;
             newline();
-            print(*decl.value);
+            printDeduced(*decl.value);
             indent_level--;
         }
     }
@@ -57,34 +59,35 @@ public:
     void print(const parser::TypeDeclaration& decl) {
         print_indent();
         out << "TypeDeclaration: " << decl.identifier << " = ";
-        print(decl.type);
+        printDeduced(decl.type);
         newline();
     }
 
     void print(const parser::RoutineDeclaration& decl) {
         print_indent();
         out << "RoutineDeclaration: " << decl.identifier;
-        
+
         if (!decl.parameters.empty()) {
             out << "(";
             for (size_t i = 0; i < decl.parameters.size(); ++i) {
-                if (i > 0) out << ", ";
-                print(decl.parameters[i].type);
-                out << ": "<< decl.parameters[i].identifier;
+                if (i > 0)
+                    out << ", ";
+                out << decl.parameters[i].identifier << ": ";
+                printDeduced(decl.parameters[i].type);
             }
             out << ")";
         }
-        
+
         if (decl.return_type) {
             out << " : ";
-            print(*decl.return_type);
+            printDeduced(*decl.return_type);
         }
         
         if (decl.body) {
             out << ", Body: ";
             newline();
             indent_level++;
-            std::visit([this](const auto& b) { this->print(b); }, *decl.body);
+            std::visit([this](const auto& b) { this->printDeduced(b); }, *decl.body);
             indent_level--;
         }
         newline();
@@ -92,7 +95,7 @@ public:
 
     // Types
     void print(const parser::Type& type) {
-        std::visit([this](const auto& t) { this->print(t); }, type);
+        std::visit([this](const auto& t) { this->printDeduced(t); }, type);
     }
 
     void print(const parser::IntegerType& /*unused*/) {
@@ -116,7 +119,7 @@ public:
             newline();
             for (size_t i = 0; i < record.fields.size(); ++i) {
                 const auto& field = record.fields[i];
-                print(*field);
+                printDeduced(*field);
                 if (i < record.fields.size() - 1){
                     out << ", ";
                 }
@@ -136,14 +139,14 @@ public:
             out << "[";
             indent_level++;
             newline();
-            print(*array.size);
+            printDeduced(*array.size);
             indent_level--;
             newline();
             print_indent();
             out << "]";
         }
         out << " of ";
-        print(*array.element_type);
+        printDeduced(*array.element_type);
     }
 
     void print(const std::string& type_name) {
@@ -156,7 +159,7 @@ public:
         out << "Expression: ";
         newline();
         indent_level++;
-        print(expr.first);
+        printDeduced(expr.first);
         for (const auto& [op, bool_expr] : expr.rest) {
             newline();
             print_indent();
@@ -167,13 +170,13 @@ public:
                 case parser::Expression::Operation::Xor: out << "XOR "; break;
             }
             newline();
-            print(bool_expr);
+            printDeduced(bool_expr);
         }
         indent_level--;
     }
 
     void print(const parser::BooleanExpression& bool_expr) {
-        std::visit([this](const auto& be) { this->print(be); }, bool_expr);
+        std::visit([this](const auto& be) { this->printDeduced(be); }, bool_expr);
     }
 
     void print(const parser::Relation& relation) {
@@ -181,7 +184,7 @@ public:
         out << "Relation: ";
         newline();
         indent_level++;
-        print(relation.first);
+        printDeduced(relation.first);
         if (relation.second) {
             newline();
             print_indent();
@@ -195,7 +198,7 @@ public:
                 case parser::Relation::Operation::NotEqual: out << "/= "; break;
             }
             newline();
-            print(relation.second->second);
+            printDeduced(relation.second->second);
         }
         indent_level--;
     }
@@ -205,7 +208,7 @@ public:
         out << "NOT";
         indent_level++;
         newline();
-        print(not_expr.operand);
+        printDeduced(not_expr.operand);
         indent_level--;
     }
 
@@ -214,7 +217,7 @@ public:
         out << "NumberExpression: ";
         newline();
         indent_level++;
-        print(num_expr.first);
+        printDeduced(num_expr.first);
         for (const auto& [op, summand] : num_expr.rest) {
             newline();
             print_indent();
@@ -224,7 +227,7 @@ public:
                 case parser::NumberExpression::Operation::Minus: out << "- "; break;
             }
             newline();
-            print(summand);
+            printDeduced(summand);
         }
         indent_level--;
     }
@@ -234,7 +237,7 @@ public:
         out << "Summand: ";
         newline();
         indent_level++;
-        print(summand.first);
+        printDeduced(summand.first);
         
         for (const auto& [op, primary] : summand.rest) {
             newline();
@@ -246,13 +249,13 @@ public:
                 case parser::Summand::Operation::Modulo: out << " % "; break;
             }
             newline();
-            print(primary);
+            printDeduced(primary);
         }
         indent_level--;
     }
 
     void print(const parser::Primary& primary) {
-        std::visit([this](const auto& p) { this->print(p); }, primary);
+        std::visit([this](const auto& p) { this->printDeduced(p); }, primary);
     }
 
     void print(const parser::IntegerLiteral& lit) {
@@ -277,7 +280,7 @@ public:
             if (i > 0) out << ", ";
             newline();
             indent_level++;
-            print(call.arguments[i]);
+            printDeduced(call.arguments[i]);
             indent_level--;
         }
         out << ")";
@@ -293,7 +296,7 @@ public:
                     out << "[";
                     indent_level++;
                     newline();
-                    print(acc);
+                    printDeduced(acc);
                     indent_level--;
                     newline();
                     print_indent();
@@ -314,14 +317,14 @@ public:
             case parser::UnarySign::Sign::Minus: out << "- "; break;
         }
         newline();
-        print(*unary.operand);
+        printDeduced(*unary.operand);
     }
 
     void print(const std::shared_ptr<parser::Expression>& expr_ptr) {
         print_indent();
         out << "(";
         newline();
-        print(*expr_ptr);
+        printDeduced(*expr_ptr);
         newline();
         print_indent();
         out << ")";
@@ -330,32 +333,34 @@ public:
     // Statements and Block
     void print(const parser::Block& block) {
         for (const auto& element : block) {
-            std::visit([this](const auto& elem) { this->print(elem); }, element);
+            std::visit([this](const auto& elem) { this->printDeduced(elem); }, element);
             newline();
         }
     }
 
     void print(const parser::Statement& stmt) {
-        std::visit([this](const auto& s) { this->print(s); }, stmt);
+        std::visit([this](const auto& s) { this->printDeduced(s); }, stmt);
     }
 
     void print(const parser::AssignmentStatement& assign) {
         print_indent();
         out << "Assignment: ";
-        indent_level++;
+        printDeduced(assign.target);
+        out << " = ";
+        printDeduced(assign.expression);
         newline();
         print_indent();
         out << "To:";
         newline();
         indent_level++;
-        print(assign.target);
+        printDeduced(assign.target);
         indent_level--;
         newline();
         print_indent();
         out << "Value:";
         newline();
         indent_level++;
-        print(assign.expression);
+        printDeduced(assign.expression);
         indent_level--;
         indent_level--;
     }
@@ -365,22 +370,22 @@ public:
         out << "If: ";
         indent_level++;
         newline();
-        print(if_stmt.condition);
+        printDeduced(if_stmt.condition);
         indent_level--;
         newline();
         print_indent();
         out << "Then:";
         newline();
         indent_level++;
-        print(if_stmt.true_branch);
+        printDeduced(if_stmt.true_branch);
         indent_level--;
-        
+
         if (if_stmt.false_branch) {
             print_indent();
             out << "Else:";
             newline();
             indent_level++;
-            print(*if_stmt.false_branch);
+            printDeduced(*if_stmt.false_branch);
             indent_level--;
         }
         newline();
@@ -389,15 +394,15 @@ public:
     void print(const parser::WhileStatement& while_stmt) {
         print_indent();
         out << "While: ";
-        print(while_stmt.condition);
+        printDeduced(while_stmt.condition);
         newline();
-        
+
         indent_level++;
         print_indent();
         out << "Body:";
         newline();
         indent_level++;
-        print(while_stmt.body);
+        printDeduced(while_stmt.body);
         indent_level--;
     }
 
@@ -409,14 +414,14 @@ public:
         std::visit([this](const auto& r) {
             using T = std::decay_t<decltype(r)>;
             if constexpr (std::is_same_v<T, parser::Expression>) {
-                print(r);
+                printDeduced(r);
             } else if constexpr (std::is_same_v<T, std::pair<parser::Expression, parser::Expression>>) {
-                print(r.first);
+                printDeduced(r.first);
                 newline();
                 print_indent();
                 out << ".. ";
                 newline();
-                print(r.second);
+                printDeduced(r.second);
             }
         }, for_stmt.range);
         
@@ -427,13 +432,13 @@ public:
         }
         indent_level--;
         newline();
-        
+
         indent_level++;
         print_indent();
         out << "Body:";
         newline();
         indent_level++;
-        print(for_stmt.body);
+        printDeduced(for_stmt.body);
         indent_level--;
     }
 
@@ -447,7 +452,7 @@ public:
             std::visit([this](const auto& a) {
                 using T = std::decay_t<decltype(a)>;
                 if constexpr (std::is_same_v<T, parser::Expression>) {
-                    print(a);
+                    printDeduced(a);
                 } else if constexpr (std::is_same_v<T, parser::StringLiteral>) {
                     print_indent();
                     out << "\"" << a.value << "\"";
@@ -472,15 +477,25 @@ public:
     void print(const parser::StringLiteral& str_lit) {
         out << "StringLiteral(\"" << str_lit.value << "\")";
     }
+
+  private:
+    template <typename Arg>
+    using PrintOverload = void (TreePrinter::*)(const Arg&);
+
+    template<typename Arg>
+    void printDeduced(const Arg& arg) {
+        (this->*static_cast<PrintOverload<Arg>>(&TreePrinter::print))(arg);
+    }
 };
 
 } // namespace
 
 namespace parser {
 
-void print_tree(const Program& program, std::ostream& out = std::cout) { // NOLINT
+void print_tree(const Program& program, std::ostream& out) { // NOLINT
     TreePrinter printer(out);
     printer.print(program);
 }
 
 } // namespace parser
+
