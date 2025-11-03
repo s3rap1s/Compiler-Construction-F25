@@ -447,7 +447,6 @@ class TreePrinter {
         indent_level--;
         newline();
 
-        indent_level++;
         print_indent();
         out << "Body:";
         newline();
