@@ -26,6 +26,7 @@
 
 using namespace lexer;
 using namespace parser;
+using namespace analyzer;
 
 namespace {
 
@@ -123,7 +124,7 @@ int main(int argc, const char** argv) {
 
     // print_tree(*ast);
     
-    std::expected<Program, analyzer::SemanticError> analysis_result = analyzer::analyze(*ast);
+    std::expected<Program, SemanticError> analysis_result = analyze(*ast);
     if (!analysis_result) {
         program_text = std::move(lexer).getProgramText();
         std::cout << analysis_result.error().what;

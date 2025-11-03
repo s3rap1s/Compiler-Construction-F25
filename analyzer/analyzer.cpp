@@ -11,6 +11,8 @@
 #include <memory>
 #include <optional>
 #include <ranges>
+#include <string>
+#include <type_traits>
 #include <unordered_map>
 #include <utility>
 #include <variant>
@@ -24,11 +26,11 @@ class SemanticAnalyzer {
 private:
     class SymbolTable{
         public:
-        std::unordered_map<std::string, VariableDeclaration> variables;
-        std::unordered_map<std::string, TypeDeclaration> types;
-        std::unordered_map<std::string, std::pair<RoutineDeclaration, bool>> routines;
+        std::unordered_map<std::string, bool> variables;
+        std::unordered_map<std::string, bool> types;
+        std::unordered_map<std::string, std::pair<std::pair<RoutineDeclaration, bool>, bool>> routines;
         
-        std::vector<std::unordered_map<std::string, VariableDeclaration>> local_scopes;
+        std::vector<std::unordered_map<std::string, bool>> local_scopes;
         std::vector<std::string> for_loop_variables;
 
         
@@ -41,7 +43,7 @@ private:
         }
         
         bool varExists(const std::string& identifier) const {
-            for (const auto & local_scope : std::ranges::reverse_view(local_scopes)) {
+            for (const auto& local_scope : std::ranges::reverse_view(local_scopes)) {
                 if (local_scope.contains(identifier)) {
                     return true;
                 }
@@ -49,16 +51,39 @@ private:
             return variables.contains(identifier);
         }
         
-        void addLocalVar(const VariableDeclaration& var) {
+        void addLocalVar(const std::string& identifier) {
             if (!local_scopes.empty()) {
-                local_scopes.back()[var.identifier] = var;
+                local_scopes.back()[identifier] = false;
+            }
+        }
+
+        void markVarUsed(const std::string& identifier){
+            for (auto& local_scope: std::ranges::reverse_view(local_scopes)){
+                if (local_scope.contains(identifier)) {
+                    local_scope[identifier] = true;
+                    return;
+                }
+            }
+            if (variables.contains(identifier)){
+                variables[identifier] = true;
+            }
+        }
+
+        void markTypeUsed(const std::string& identifier) {
+            if (types.contains(identifier)) {
+                types[identifier] = true;
+            }
+        }
+
+        void markRoutineUsed(const std::string& identifier){
+            if (routines.contains(identifier)){
+                routines[identifier].second = true;
             }
         }
     }; 
 
     Program& program; // NOLINT(*ref*)
     SymbolTable table;
-    
 
     void checkExpression(const Expression& expr) {
         checkBooleanExpression(expr.first);
@@ -123,7 +148,8 @@ private:
         if (!table.varExists(mp.variable)) {
             throw SemanticError{"Undeclared variable: " + mp.variable, mp.span};
         }
-        
+        table.markVarUsed(mp.variable);        
+
         for (const auto& accessor : mp.accessors) {
             if (std::holds_alternative<Expression>(accessor)) {
                 checkExpression(std::get<Expression>(accessor));
@@ -136,8 +162,8 @@ private:
         if (routine_it == table.routines.end()) {
             throw SemanticError{"Undeclared routine: " + call.name, call.span};
         }
-        
-        const auto& routine_decl = routine_it->second.first;
+        table.markRoutineUsed(call.name);
+        const RoutineDeclaration& routine_decl = routine_it->second.first.first;
         
         if (call.arguments.size() != routine_decl.parameters.size()) {
             throw SemanticError{"Routine " + call.name + " expects " + 
@@ -150,6 +176,29 @@ private:
         }
     }
 
+    void checkType(const Type& type) {
+        std::visit([this](const auto& t) {
+            using T = std::decay_t<decltype(t)>;
+            
+            if constexpr (std::is_same_v<T, std::string>) {
+                table.markTypeUsed(t);
+            }
+            else if constexpr (std::is_same_v<T, ArrayType>) {
+                checkType(*t.element_type);
+                if (t.size) {
+                    checkExpression(*t.size);
+                }
+            }
+            else if constexpr (std::is_same_v<T, RecordType>) {
+                for (const auto& field : t.fields) {
+                    if (field->type) {
+                        checkType(*field->type);
+                    }
+                }
+            }
+        }, type);
+    }
+
     void checkBlock(const Block& block) {
         table.pushScope();
         
@@ -158,11 +207,17 @@ private:
                 using T = std::decay_t<decltype(elem)>;
                 
                 if constexpr (std::is_same_v<T, VariableDeclaration>) {
-                    table.addLocalVar(elem);
+                    table.addLocalVar(elem.identifier);
                     
+                    if (elem.type) {
+                        checkType(*elem.type);
+                    }
                     if (elem.value) {
                         checkExpression(*elem.value);
                     }
+                }
+                else if constexpr (std::is_same_v<T, TypeDeclaration>) {
+                    checkType(elem.type);
                 }
                 else if constexpr (std::is_same_v<T, Statement>) {
                     checkStatement(elem);
@@ -224,9 +279,8 @@ private:
 
     void checkForStatement(const ForStatement& for_stmt) {
         table.pushScope();
-        VariableDeclaration loop_var{for_stmt.counter, std::nullopt, std::nullopt};
-        table.addLocalVar(loop_var);
-        
+        table.addLocalVar(for_stmt.counter);
+        table.markVarUsed(for_stmt.counter);
         table.for_loop_variables.push_back(for_stmt.counter);
         
         if (std::holds_alternative<Expression>(for_stmt.range)) {
@@ -249,10 +303,12 @@ private:
         table.pushScope();
         
         for (const auto& param : routine.parameters) {
-            VariableDeclaration param_var{param.identifier, param.type, std::nullopt};
-            table.addLocalVar(param_var);
+            table.addLocalVar(param.identifier);
+            checkType(param.type);
         }
-        
+        if (routine.return_type){
+            checkType(*routine.return_type);
+        }
         if (std::holds_alternative<Expression>(*routine.body)) {
             checkExpression(std::get<Expression>(*routine.body));
         } else {
@@ -264,8 +320,8 @@ private:
 
     void checkForwardDeclarations() {
         for (const auto& [identifier, routine_pair] : table.routines) {
-            if (!routine_pair.second) {
-                throw SemanticError{"Forward declared routine \"" + identifier + "\" is never defined", routine_pair.first.span};
+            if (!routine_pair.first.second) {
+                throw SemanticError{"Forward declared routine \"" + identifier + "\" is never defined", routine_pair.first.first.span};
             }
         }
     }
@@ -273,6 +329,11 @@ private:
 public:
     explicit SemanticAnalyzer(Program& program) : program{program} {
         table = SymbolTable{};
+    }
+
+    void analysisOptimization() {
+        table.routines["main"].second = true;
+
     }
 
     std::optional<SemanticError> analysisChecks() { //NOLINT(*complexity*)
@@ -287,14 +348,21 @@ public:
                         if (table.variables.find(d.identifier) != table.variables.end()) {
                             throw SemanticError{"Duplicate variable declaration: " + d.identifier, d.span};
                         }
-                        table.variables[d.identifier] = d;
-                        table.addLocalVar(d);
+                        table.variables[d.identifier] = false;
+                        table.addLocalVar(d.identifier);
+                        if (d.type){
+                            checkType(*d.type);
+                        }
+                        if (d.value){
+                            checkExpression(*d.value);
+                        }
                     }
                     else if constexpr (std::is_same_v<T, TypeDeclaration>) {
                         if (table.types.contains(d.identifier)) {
                             throw SemanticError{"Duplicate type declaration: " + d.identifier, d.span};
                         }
-                        table.types[d.identifier] = d;
+                        table.types[d.identifier] = false;
+                        checkType(d.type);
                     }
                     else if constexpr (std::is_same_v<T, RoutineDeclaration>) {
                         auto it = table.routines.find(d.identifier);
@@ -302,18 +370,10 @@ public:
                             throw SemanticError{"Duplicate routine declaration: " + d.identifier, d.span};
                         }
                         bool is_defined = static_cast<bool>(d.body);
-                        table.routines[d.identifier] = {d, is_defined};
+                        table.routines[d.identifier] = {{d, is_defined}, false};
+                        checkRoutineDeclaration(d);
                     }
                 }, decl);
-            }
-
-            for (const auto& decl : program.declarations) {
-                if (std::holds_alternative<RoutineDeclaration>(decl)) {
-                    const auto& routine = std::get<RoutineDeclaration>(decl);
-                    if (routine.body) {
-                        checkRoutineDeclaration(routine);
-                    }
-                }
             }
 
             checkForwardDeclarations();
@@ -331,6 +391,7 @@ public:
         if (error) {
             return std::unexpected{*error};
         }
+        analysisOptimization();
         return program;
     }
 };
