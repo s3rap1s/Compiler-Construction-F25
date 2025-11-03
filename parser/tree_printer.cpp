@@ -18,6 +18,7 @@ namespace {
 class TreePrinter {
     std::ostream& out; //NOLINT(*ref-data*)
     int indent_level = 0;
+    bool compact_mode = true;
 
     void print_indent() {
         for (int i = 0; i < indent_level; ++i) {
@@ -155,6 +156,10 @@ class TreePrinter {
 
     // Expressions
     void print(const parser::Expression& expr) {
+        if(expr.rest.empty() && compact_mode){
+            printDeduced(expr.first);
+            return;
+        }
         print_indent();
         out << "Expression: ";
         newline();
@@ -180,6 +185,10 @@ class TreePrinter {
     }
 
     void print(const parser::Relation& relation) {
+        if(!relation.second && compact_mode){
+            printDeduced(relation.first);
+            return;
+        }
         print_indent();
         out << "Relation: ";
         newline();
@@ -213,6 +222,10 @@ class TreePrinter {
     }
 
     void print(const parser::NumberExpression& num_expr) {
+        if (num_expr.rest.empty() && compact_mode){
+            printDeduced(num_expr.first);
+            return;
+        }
         print_indent();
         out << "NumberExpression: ";
         newline();
@@ -233,6 +246,10 @@ class TreePrinter {
     }
     
     void print(const parser::Summand& summand) {
+        if (summand.rest.empty() && compact_mode){
+            printDeduced(summand.first);
+            return;
+        }
         print_indent();
         out << "Summand: ";
         newline();
