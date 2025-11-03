@@ -14,21 +14,21 @@
 namespace {
 
 class TreePrinter {
-    std::ostream* out;
+    std::ostream& out; //NOLINT(*ref-data*)
     int indent_level = 0;
 
     void print_indent() {
         for (int i = 0; i < indent_level; ++i) {
-            *out << "   ";
+            out << "   ";
         }
     }
 
     void newline() {
-        *out << "\n";
+        out << "\n";
     }
 
 public:
-    explicit TreePrinter(std::ostream* output_stream) : out(output_stream) {}
+    explicit TreePrinter(std::ostream& output_stream) : out(output_stream) {}
 
     // Program
     void print(const parser::Program& program) {
@@ -40,13 +40,13 @@ public:
     // Declarations
     void print(const parser::VariableDeclaration& decl) {
         print_indent();
-        *out << "VariableDeclaration: " << decl.identifier;
+        out << "VariableDeclaration: " << decl.identifier;
         if (decl.type) {
-            *out << " : ";
+            out << " : ";
             print(*decl.type);
         }
         if (decl.value) {
-            *out << " = ";
+            out << " = ";
             indent_level++;
             newline();
             print(*decl.value);
@@ -56,32 +56,32 @@ public:
 
     void print(const parser::TypeDeclaration& decl) {
         print_indent();
-        *out << "TypeDeclaration: " << decl.identifier << " = ";
+        out << "TypeDeclaration: " << decl.identifier << " = ";
         print(decl.type);
         newline();
     }
 
     void print(const parser::RoutineDeclaration& decl) {
         print_indent();
-        *out << "RoutineDeclaration: " << decl.identifier;
+        out << "RoutineDeclaration: " << decl.identifier;
         
         if (!decl.parameters.empty()) {
-            *out << "(";
+            out << "(";
             for (size_t i = 0; i < decl.parameters.size(); ++i) {
-                if (i > 0) *out << ", ";
+                if (i > 0) out << ", ";
                 print(decl.parameters[i].type);
-                *out << ": "<< decl.parameters[i].identifier;
+                out << ": "<< decl.parameters[i].identifier;
             }
-            *out << ")";
+            out << ")";
         }
         
         if (decl.return_type) {
-            *out << " : ";
+            out << " : ";
             print(*decl.return_type);
         }
         
         if (decl.body) {
-            *out << ", Body: ";
+            out << ", Body: ";
             newline();
             indent_level++;
             std::visit([this](const auto& b) { this->print(b); }, *decl.body);
@@ -95,34 +95,34 @@ public:
     }
 
     void print(const parser::IntegerType& /*unused*/) {
-        *out << "Integer";
+        out << "Integer";
     }
 
     void print(const parser::RealType& /*unused*/) {
-        *out << "Real";
+        out << "Real";
     }
 
     void print(const parser::BoolType& /*unused*/) {
-        *out << "Boolean";
+        out << "Boolean";
     }
 
     void print(const parser::RecordType& record) {
         print_indent();
-        *out << "Record";
+        out << "Record";
         indent_level++;
         if (!record.fields.empty()) {
-            *out << " {";
+            out << " {";
             newline();
             for (size_t i = 0; i < record.fields.size(); ++i) {
                 const auto& field = record.fields[i];
                 print(*field);
                 if (i < record.fields.size() - 1){
-                    *out << ", ";
+                    out << ", ";
                 }
                 newline();
             }
             print_indent();
-            *out << "}";
+            out << "}";
         }
         newline();
         indent_level--;
@@ -130,40 +130,40 @@ public:
 
     void print(const parser::ArrayType& array) {
         print_indent();
-        *out << "Array";
+        out << "Array";
         if (array.size) {
-            *out << "[";
+            out << "[";
             indent_level++;
             newline();
             print(*array.size);
             indent_level--;
             newline();
             print_indent();
-            *out << "]";
+            out << "]";
         }
-        *out << " of ";
+        out << " of ";
         print(*array.element_type);
     }
 
     void print(const std::string& type_name) {
-        *out << type_name;
+        out << type_name;
     }
 
     // Expressions
     void print(const parser::Expression& expr) {
         print_indent();
-        *out << "Expression: ";
+        out << "Expression: ";
         newline();
         indent_level++;
         print(expr.first);
         for (const auto& [op, bool_expr] : expr.rest) {
             newline();
             print_indent();
-            *out << "Operation: ";
+            out << "Operation: ";
             switch (op) {
-                case parser::Expression::Operation::And: *out << "AND "; break;
-                case parser::Expression::Operation::Or: *out << "OR "; break;
-                case parser::Expression::Operation::Xor: *out << "XOR "; break;
+                case parser::Expression::Operation::And: out << "AND "; break;
+                case parser::Expression::Operation::Or: out << "OR "; break;
+                case parser::Expression::Operation::Xor: out << "XOR "; break;
             }
             newline();
             print(bool_expr);
@@ -177,21 +177,21 @@ public:
 
     void print(const parser::Relation& relation) {
         print_indent();
-        *out << "Relation: ";
+        out << "Relation: ";
         newline();
         indent_level++;
         print(relation.first);
         if (relation.second) {
             newline();
             print_indent();
-            *out << "Operation: ";
+            out << "Operation: ";
             switch (relation.second->first) {
-                case parser::Relation::Operation::Less: *out << "< "; break;
-                case parser::Relation::Operation::LessOrEqual: *out << "<= "; break;
-                case parser::Relation::Operation::Greater: *out << "> "; break;
-                case parser::Relation::Operation::GreaterOrEqual: *out << ">= "; break;
-                case parser::Relation::Operation::Equal: *out << "= "; break;
-                case parser::Relation::Operation::NotEqual: *out << "/= "; break;
+                case parser::Relation::Operation::Less: out << "< "; break;
+                case parser::Relation::Operation::LessOrEqual: out << "<= "; break;
+                case parser::Relation::Operation::Greater: out << "> "; break;
+                case parser::Relation::Operation::GreaterOrEqual: out << ">= "; break;
+                case parser::Relation::Operation::Equal: out << "= "; break;
+                case parser::Relation::Operation::NotEqual: out << "/= "; break;
             }
             newline();
             print(relation.second->second);
@@ -201,7 +201,7 @@ public:
 
     void print(const parser::NotExpression& not_expr) {
         print_indent();
-        *out << "NOT";
+        out << "NOT";
         indent_level++;
         newline();
         print(not_expr.operand);
@@ -210,17 +210,17 @@ public:
 
     void print(const parser::NumberExpression& num_expr) {
         print_indent();
-        *out << "NumberExpression: ";
+        out << "NumberExpression: ";
         newline();
         indent_level++;
         print(num_expr.first);
         for (const auto& [op, summand] : num_expr.rest) {
             newline();
             print_indent();
-            *out << "Operation: ";
+            out << "Operation: ";
             switch (op) {
-                case parser::NumberExpression::Operation::Plus: *out << "+ "; break;
-                case parser::NumberExpression::Operation::Minus: *out << "- "; break;
+                case parser::NumberExpression::Operation::Plus: out << "+ "; break;
+                case parser::NumberExpression::Operation::Minus: out << "- "; break;
             }
             newline();
             print(summand);
@@ -230,7 +230,7 @@ public:
     
     void print(const parser::Summand& summand) {
         print_indent();
-        *out << "Summand: ";
+        out << "Summand: ";
         newline();
         indent_level++;
         print(summand.first);
@@ -238,11 +238,11 @@ public:
         for (const auto& [op, primary] : summand.rest) {
             newline();
             print_indent();
-            *out << "Operation: ";
+            out << "Operation: ";
             switch (op) {
-                case parser::Summand::Operation::Multiply: *out << " * "; break;
-                case parser::Summand::Operation::Divide: *out << " / "; break;
-                case parser::Summand::Operation::Modulo: *out << " % "; break;
+                case parser::Summand::Operation::Multiply: out << " * "; break;
+                case parser::Summand::Operation::Divide: out << " / "; break;
+                case parser::Summand::Operation::Modulo: out << " % "; break;
             }
             newline();
             print(primary);
@@ -256,49 +256,49 @@ public:
 
     void print(const parser::IntegerLiteral& lit) {
         print_indent();
-        *out << "IntegerLiteral(" << lit.value << ")";
+        out << "IntegerLiteral(" << lit.value << ")";
     }
 
     void print(const parser::RealLiteral& lit) {
         print_indent();
-        *out << "RealLiteral(" << lit.value << ")";
+        out << "RealLiteral(" << lit.value << ")";
     }
 
     void print(const parser::BooleanLiteral& lit) {
         print_indent();
-        *out << "BooleanLiteral(" << (lit.value ? "true" : "false") << ")";
+        out << "BooleanLiteral(" << (lit.value ? "true" : "false") << ")";
     }
 
     void print(const parser::RoutineCall& call) {
         print_indent();
-        *out << "RoutineCall: " << call.name << "(";
+        out << "RoutineCall: " << call.name << "(";
         for (size_t i = 0; i < call.arguments.size(); ++i) {
-            if (i > 0) *out << ", ";
+            if (i > 0) out << ", ";
             newline();
             indent_level++;
             print(call.arguments[i]);
             indent_level--;
         }
-        *out << ")";
+        out << ")";
     }
 
     void print(const parser::ModifiablePrimary& mp) {
         print_indent();
-        *out << "Identifier: " << mp.variable;
+        out << "Identifier: " << mp.variable;
         for (const auto& accessor : mp.accessors) {
             std::visit([this](const auto& acc) {
                 using T = std::decay_t<decltype(acc)>;
                 if constexpr (std::is_same_v<T, parser::Expression>) {
-                    *out << "[";
+                    out << "[";
                     indent_level++;
                     newline();
                     print(acc);
                     indent_level--;
                     newline();
                     print_indent();
-                    *out << "]";
+                    out << "]";
                 } else if constexpr (std::is_same_v<T, std::string>) {
-                    *out << "." << acc;
+                    out << "." << acc;
                 }
             }, accessor);
         }
@@ -307,10 +307,10 @@ public:
     void print(const parser::UnarySign& unary) {
         newline();
         print_indent();
-        *out << "Operation: ";
+        out << "Operation: ";
         switch (unary.sign) {
-            case parser::UnarySign::Sign::Plus: *out << "+ "; break;
-            case parser::UnarySign::Sign::Minus: *out << "- "; break;
+            case parser::UnarySign::Sign::Plus: out << "+ "; break;
+            case parser::UnarySign::Sign::Minus: out << "- "; break;
         }
         newline();
         print(*unary.operand);
@@ -318,12 +318,12 @@ public:
 
     void print(const std::shared_ptr<parser::Expression>& expr_ptr) {
         print_indent();
-        *out << "(";
+        out << "(";
         newline();
         print(*expr_ptr);
         newline();
         print_indent();
-        *out << ")";
+        out << ")";
     }
 
     // Statements and Block
@@ -340,18 +340,18 @@ public:
 
     void print(const parser::AssignmentStatement& assign) {
         print_indent();
-        *out << "Assignment: ";
+        out << "Assignment: ";
         indent_level++;
         newline();
         print_indent();
-        *out << "To:";
+        out << "To:";
         newline();
         indent_level++;
         print(assign.target);
         indent_level--;
         newline();
         print_indent();
-        *out << "Value:";
+        out << "Value:";
         newline();
         indent_level++;
         print(assign.expression);
@@ -361,14 +361,14 @@ public:
 
     void print(const parser::IfStatement& if_stmt) {
         print_indent();
-        *out << "If: ";
+        out << "If: ";
         indent_level++;
         newline();
         print(if_stmt.condition);
         indent_level--;
         newline();
         print_indent();
-        *out << "Then:";
+        out << "Then:";
         newline();
         indent_level++;
         print(if_stmt.true_branch);
@@ -376,7 +376,7 @@ public:
         
         if (if_stmt.false_branch) {
             print_indent();
-            *out << "Else:";
+            out << "Else:";
             newline();
             indent_level++;
             print(*if_stmt.false_branch);
@@ -387,13 +387,13 @@ public:
 
     void print(const parser::WhileStatement& while_stmt) {
         print_indent();
-        *out << "While: ";
+        out << "While: ";
         print(while_stmt.condition);
         newline();
         
         indent_level++;
         print_indent();
-        *out << "Body:";
+        out << "Body:";
         newline();
         indent_level++;
         print(while_stmt.body);
@@ -402,7 +402,7 @@ public:
 
     void print(const parser::ForStatement& for_stmt) {
         print_indent();
-        *out << "For: " << for_stmt.counter << " in ";
+        out << "For: " << for_stmt.counter << " in ";
         newline();
         indent_level++;
         std::visit([this](const auto& r) {
@@ -413,7 +413,7 @@ public:
                 print(r.first);
                 newline();
                 print_indent();
-                *out << ".. ";
+                out << ".. ";
                 newline();
                 print(r.second);
             }
@@ -422,14 +422,14 @@ public:
         if (for_stmt.is_reversed) {
             newline();
             print_indent();
-            *out << "REVERSE";
+            out << "REVERSE";
         }
         indent_level--;
         newline();
         
         indent_level++;
         print_indent();
-        *out << "Body:";
+        out << "Body:";
         newline();
         indent_level++;
         print(for_stmt.body);
@@ -438,18 +438,18 @@ public:
 
     void print(const parser::PrintStatement& print_stmt) {
         print_indent();
-        *out << "Print: ";
+        out << "Print: ";
         newline();
         indent_level++;
         for (size_t i = 0; i < print_stmt.arguments.size(); ++i) {
-            if (i > 0) *out << ", \n";
+            if (i > 0) out << ", \n";
             std::visit([this](const auto& a) {
                 using T = std::decay_t<decltype(a)>;
                 if constexpr (std::is_same_v<T, parser::Expression>) {
                     print(a);
                 } else if constexpr (std::is_same_v<T, parser::StringLiteral>) {
                     print_indent();
-                    *out << "\"" << a.value << "\"";
+                    out << "\"" << a.value << "\"";
                 }
             }, print_stmt.arguments[i]);
         }
@@ -458,9 +458,9 @@ public:
 
     void print(const parser::ReturnStatement& return_stmt) {
         print_indent();
-        *out << "Return";
+        out << "Return";
         if (return_stmt.value) {
-            *out << ": ";
+            out << ": ";
             newline();
             indent_level++;
             print(*return_stmt.value);
@@ -469,7 +469,7 @@ public:
     }
 
     void print(const parser::StringLiteral& str_lit) {
-        *out << "StringLiteral(\"" << str_lit.value << "\")";
+        out << "StringLiteral(\"" << str_lit.value << "\")";
     }
 };
 
@@ -477,7 +477,7 @@ public:
 
 namespace parser {
 
-void print_tree(const Program& program, std::ostream* out = &std::cout) { // NOLINT
+void print_tree(const Program& program, std::ostream& out = std::cout) { // NOLINT
     TreePrinter printer(out);
     printer.print(program);
 }

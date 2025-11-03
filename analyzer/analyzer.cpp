@@ -22,38 +22,43 @@ using namespace parser;
 
 class SemanticAnalyzer {
 private:
-    Program& program; // NOLINT(*ref*)
-    
-    std::unordered_map<std::string, VariableDeclaration> variables;
-    std::unordered_map<std::string, TypeDeclaration> types;
-    std::unordered_map<std::string, std::pair<RoutineDeclaration, bool>> routines;
+    class SymbolTable{
+        public:
+        std::unordered_map<std::string, VariableDeclaration> variables;
+        std::unordered_map<std::string, TypeDeclaration> types;
+        std::unordered_map<std::string, std::pair<RoutineDeclaration, bool>> routines;
+        
+        std::vector<std::unordered_map<std::string, VariableDeclaration>> local_scopes;
+        std::vector<std::string> for_loop_variables;
 
-    std::vector<std::unordered_map<std::string, VariableDeclaration>> local_scopes;
-    
-    std::vector<std::string> for_loop_variables;
-
-    void push_scope() {
-        local_scopes.emplace_back();
-    }
-
-    void pop_scope() {
-        local_scopes.pop_back();
-    }
-
-    bool variable_exists(const std::string& identifier) const {
-        for (const auto & local_scope : std::ranges::reverse_view(local_scopes)) {
-            if (local_scope.contains(identifier)) {
-                return true;
+        
+        void pushScope() {
+            local_scopes.emplace_back();
+        }
+        
+        void popScope() {
+            local_scopes.pop_back();
+        }
+        
+        bool varExists(const std::string& identifier) const {
+            for (const auto & local_scope : std::ranges::reverse_view(local_scopes)) {
+                if (local_scope.contains(identifier)) {
+                    return true;
+                }
+            }
+            return variables.contains(identifier);
+        }
+        
+        void addLocalVar(const VariableDeclaration& var) {
+            if (!local_scopes.empty()) {
+                local_scopes.back()[var.identifier] = var;
             }
         }
-        return variables.contains(identifier);
-    }
+    }; 
 
-    void add_local_variable(const VariableDeclaration& var) {
-        if (!local_scopes.empty()) {
-            local_scopes.back()[var.identifier] = var;
-        }
-    }
+    Program& program; // NOLINT(*ref*)
+    SymbolTable table;
+    
 
     void checkExpression(const Expression& expr) {
         checkBooleanExpression(expr.first);
@@ -115,7 +120,7 @@ private:
     }
 
     void checkModifiablePrimary(const ModifiablePrimary& mp) {
-        if (!variable_exists(mp.variable)) {
+        if (!table.varExists(mp.variable)) {
             throw SemanticError{"Undeclared variable: " + mp.variable, mp.span};
         }
         
@@ -127,8 +132,8 @@ private:
     }
 
     void checkRoutineCall(const RoutineCall& call) {
-        auto routine_it = routines.find(call.name);
-        if (routine_it == routines.end()) {
+        auto routine_it = table.routines.find(call.name);
+        if (routine_it == table.routines.end()) {
             throw SemanticError{"Undeclared routine: " + call.name, call.span};
         }
         
@@ -146,14 +151,14 @@ private:
     }
 
     void checkBlock(const Block& block) {
-        push_scope();
+        table.pushScope();
         
         for (const auto& element : block) {
             std::visit([this](const auto& elem) {
                 using T = std::decay_t<decltype(elem)>;
                 
                 if constexpr (std::is_same_v<T, VariableDeclaration>) {
-                    add_local_variable(elem);
+                    table.addLocalVar(elem);
                     
                     if (elem.value) {
                         checkExpression(*elem.value);
@@ -165,7 +170,7 @@ private:
             }, element);
         }
         
-        pop_scope();
+        table.popScope();
     }
 
     void checkStatement(const Statement& stmt) {
@@ -210,7 +215,7 @@ private:
     void checkAssignment(const AssignmentStatement& assignment) {
         checkModifiablePrimary(assignment.target);
         
-        if (std::ranges::find(for_loop_variables, assignment.target.variable) != for_loop_variables.end()) {
+        if (std::ranges::find(table.for_loop_variables, assignment.target.variable) != table.for_loop_variables.end()) {
             throw SemanticError{"Cannot assign to for loop variable: " + assignment.target.variable, assignment.span};
         }
         
@@ -218,11 +223,11 @@ private:
     }
 
     void checkForStatement(const ForStatement& for_stmt) {
-        push_scope();
+        table.pushScope();
         VariableDeclaration loop_var{for_stmt.counter, std::nullopt, std::nullopt};
-        add_local_variable(loop_var);
+        table.addLocalVar(loop_var);
         
-        for_loop_variables.push_back(for_stmt.counter);
+        table.for_loop_variables.push_back(for_stmt.counter);
         
         if (std::holds_alternative<Expression>(for_stmt.range)) {
             checkExpression(std::get<Expression>(for_stmt.range));
@@ -234,18 +239,18 @@ private:
         
         checkBlock(for_stmt.body);
         
-        for_loop_variables.pop_back();
-        pop_scope();
+        table.for_loop_variables.pop_back();
+        table.popScope();
     }
 
     void checkRoutineDeclaration(const RoutineDeclaration& routine) {
         if (!routine.body) return;
         
-        push_scope();
+        table.pushScope();
         
         for (const auto& param : routine.parameters) {
             VariableDeclaration param_var{param.identifier, param.type, std::nullopt};
-            add_local_variable(param_var);
+            table.addLocalVar(param_var);
         }
         
         if (std::holds_alternative<Expression>(*routine.body)) {
@@ -254,11 +259,11 @@ private:
             checkBlock(std::get<Block>(*routine.body));
         }
         
-        pop_scope();
+        table.popScope();
     }
 
     void checkForwardDeclarations() {
-        for (const auto& [identifier, routine_pair] : routines) {
+        for (const auto& [identifier, routine_pair] : table.routines) {
             if (!routine_pair.second) {
                 throw SemanticError{"Forward declared routine \"" + identifier + "\" is never defined", routine_pair.first.span};
             }
@@ -266,36 +271,38 @@ private:
     }
 
 public:
-    explicit SemanticAnalyzer(Program& program) : program{program} {}
+    explicit SemanticAnalyzer(Program& program) : program{program} {
+        table = SymbolTable{};
+    }
 
     std::optional<SemanticError> analysisChecks() { //NOLINT(*complexity*)
         try {
-            push_scope();
+            table.pushScope();
             
             for (const auto& decl : program.declarations) {
                 std::visit([this](const auto& d) {
                     using T = std::decay_t<decltype(d)>;
                     
                     if constexpr (std::is_same_v<T, VariableDeclaration>) {
-                        if (variables.find(d.identifier) != variables.end()) {
+                        if (table.variables.find(d.identifier) != table.variables.end()) {
                             throw SemanticError{"Duplicate variable declaration: " + d.identifier, d.span};
                         }
-                        variables[d.identifier] = d;
-                        add_local_variable(d);
+                        table.variables[d.identifier] = d;
+                        table.addLocalVar(d);
                     }
                     else if constexpr (std::is_same_v<T, TypeDeclaration>) {
-                        if (types.contains(d.identifier)) {
+                        if (table.types.contains(d.identifier)) {
                             throw SemanticError{"Duplicate type declaration: " + d.identifier, d.span};
                         }
-                        types[d.identifier] = d;
+                        table.types[d.identifier] = d;
                     }
                     else if constexpr (std::is_same_v<T, RoutineDeclaration>) {
-                        auto it = routines.find(d.identifier);
-                        if (it != routines.end() && it->second.second) {
+                        auto it = table.routines.find(d.identifier);
+                        if (it != table.routines.end() && it->second.second) {
                             throw SemanticError{"Duplicate routine declaration: " + d.identifier, d.span};
                         }
                         bool is_defined = static_cast<bool>(d.body);
-                        routines[d.identifier] = {d, is_defined};
+                        table.routines[d.identifier] = {d, is_defined};
                     }
                 }, decl);
             }
@@ -311,7 +318,7 @@ public:
 
             checkForwardDeclarations();
             
-            pop_scope();
+            table.popScope();
             
         } catch (const SemanticError& error) {
             return error;
