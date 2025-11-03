@@ -362,10 +362,8 @@ class TreePrinter {
     void print(const parser::AssignmentStatement& assign) {
         print_indent();
         out << "Assignment: ";
-        printDeduced(assign.target);
-        out << " = ";
-        printDeduced(assign.expression);
         newline();
+        indent_level++;
         print_indent();
         out << "To:";
         newline();
@@ -426,6 +424,9 @@ class TreePrinter {
     void print(const parser::ForStatement& for_stmt) {
         print_indent();
         out << "For: " << for_stmt.counter << " in ";
+        if (for_stmt.is_reversed) {
+            out << "REVERSED ";
+        }
         newline();
         indent_level++;
         std::visit([this](const auto& r) {
@@ -442,11 +443,7 @@ class TreePrinter {
             }
         }, for_stmt.range);
         
-        if (for_stmt.is_reversed) {
-            newline();
-            print_indent();
-            out << "REVERSE";
-        }
+        
         indent_level--;
         newline();
 

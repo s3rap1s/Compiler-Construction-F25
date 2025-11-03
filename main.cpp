@@ -107,6 +107,7 @@ int main(int argc, const char** argv) {
 
     // read entire file into string
     std::string_view filename = argv[1];
+    std::string_view entry_point = (argc < 3 ? "main" : argv[2]);
     std::fstream file{argv[1], file.in | file.ate};
     if (!file) {
         logErrorLn("Failed to open the file");
@@ -115,7 +116,7 @@ int main(int argc, const char** argv) {
     std::string program_text = readFile(file);
 
     Lexer lexer{std::move(program_text)};
-    std::expected<Program, SyntaxError> ast = parse(lexer);
+    std::expected<Program, SyntaxError> ast = parse(lexer, entry_point);
     if (!ast) {
         program_text = std::move(lexer).getProgramText();
         handleSyntaxError(ast.error(), filename, program_text);

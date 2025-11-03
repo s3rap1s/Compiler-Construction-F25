@@ -17,6 +17,7 @@
 #include <iterator>
 #include <memory>
 #include <optional>
+#include <string_view>
 #include <utility>
 #include <variant>
 #include <vector>
@@ -60,6 +61,7 @@ using SyntaxPart = lexer::SyntaxPart;
 class Parser {
     lexer::Lexer& lexer; // NOLINT(*ref-data*)
     std::optional<lexer::Lexer::ResultType> token_store = std::nullopt;
+    std::string_view entry_point;
     lexer::TokenIterator next_token_it{lexer, token_store}; // initialize after lexer and token store
     Span last_span{};
     bool newline_encountered = false;
@@ -201,6 +203,9 @@ class Parser {
                 program.declarations.emplace_back(std::move(td));
             } else if (keyword == SyntaxPart::Routine) {
                 BIND(rd, parseRoutineDeclaration());
+                if (rd.identifier == entry_point){
+                    program.entry_point = rd;
+                }
                 program.declarations.emplace_back(std::move(rd));
             } else {
                 std::unreachable();
@@ -280,7 +285,6 @@ class Parser {
                 BIND_SET(body, parseExpression());
             }
         }
-
         return RoutineDeclaration{{getLastSpan()}, 
                                 std::move(id).name,
                                 std::move(params),
@@ -690,7 +694,7 @@ class Parser {
     }
 
   public:
-    explicit Parser(lexer::Lexer& lexer) : lexer{lexer} {}
+    explicit Parser(lexer::Lexer& lexer, std::string_view entry_point) : lexer{lexer}, entry_point{entry_point} {}
 
     std::expected<Program, SyntaxError> parse() {
         return parseProgram();
@@ -700,8 +704,8 @@ class Parser {
 
 } // namespace
 
-std::expected<Program, SyntaxError> parse(lexer::Lexer& lexer) {
-    Parser parser{lexer};
+std::expected<Program, SyntaxError> parse(lexer::Lexer& lexer, std::string_view entry_point) {
+    Parser parser{lexer, entry_point};
     return parser.parse();
 }
 

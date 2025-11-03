@@ -421,7 +421,7 @@ private:
     }
 
     void optimizeProgram() {
-        table.routines.at("main").second = true;
+        table.routines.at(program.entry_point.identifier).second = true;
         auto it = program.declarations.begin();
         while (it != program.declarations.end()) {
             if (std::holds_alternative<VariableDeclaration>(*it)) {

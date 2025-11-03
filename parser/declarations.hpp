@@ -43,6 +43,7 @@ struct TypeDeclaration : AstNode {
 };
 
 struct Program {
+    RoutineDeclaration entry_point;
     std::vector<std::variant<VariableDeclaration, TypeDeclaration, RoutineDeclaration>> declarations;
 };
 
