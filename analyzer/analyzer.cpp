@@ -33,6 +33,9 @@ private:
         std::vector<std::unordered_map<std::string, bool>> local_scopes;
         std::vector<std::string> for_loop_variables;
 
+        std::unordered_map<const Block*, std::unordered_map<std::string, bool>> block_var_usage;
+        const Block* current_block = nullptr;
+        
         
         void pushScope() {
             local_scopes.emplace_back();
@@ -61,6 +64,9 @@ private:
             for (auto& local_scope: std::ranges::reverse_view(local_scopes)){
                 if (local_scope.contains(identifier)) {
                     local_scope[identifier] = true;
+                    if (current_block){
+                        block_var_usage[current_block][identifier] = true;
+                    }
                     return;
                 }
             }
@@ -78,6 +84,24 @@ private:
         void markRoutineUsed(const std::string& identifier){
             if (routines.contains(identifier)){
                 routines[identifier].second = true;
+            }
+        }
+
+        void setCurrentBlock(const Block* ptr){
+            current_block = ptr;
+            if (ptr && !block_var_usage.contains(ptr)){
+                block_var_usage[ptr] = {};
+            }
+        }
+
+        void saveBlockVarUsage(const Block& block) {
+            if (!local_scopes.empty()) {
+                auto& current_scope = local_scopes.back();
+                auto& block_usage = block_var_usage[&block];
+                
+                for (const auto& [var_name, used] : current_scope) {
+                    block_usage[var_name] = used;
+                }
             }
         }
     }; 
@@ -102,8 +126,7 @@ private:
                 if (expr.second) {
                     checkNumberExpression(expr.second->second);
                 }
-            }
-            else if constexpr (std::is_same_v<T, NotExpression>) {
+            } else if constexpr (std::is_same_v<T, NotExpression>) {
                 checkPrimary(expr.operand);
             }
         }, bool_expr);
@@ -131,14 +154,11 @@ private:
             
             if constexpr (std::is_same_v<T, RoutineCall>) {
                 checkRoutineCall(prim);
-            }
-            else if constexpr (std::is_same_v<T, ModifiablePrimary>) {
+            } else if constexpr (std::is_same_v<T, ModifiablePrimary>) {
                 checkModifiablePrimary(prim);
-            }
-            else if constexpr (std::is_same_v<T, std::shared_ptr<Expression>>) {
+            } else if constexpr (std::is_same_v<T, std::shared_ptr<Expression>>) {
                 checkExpression(*prim);
-            }
-            else if constexpr (std::is_same_v<T, UnarySign>) {
+            } else if constexpr (std::is_same_v<T, UnarySign>) {
                 checkPrimary(*prim.operand);
             }
         }, primary);
@@ -182,17 +202,23 @@ private:
             
             if constexpr (std::is_same_v<T, std::string>) {
                 table.markTypeUsed(t);
-            }
-            else if constexpr (std::is_same_v<T, ArrayType>) {
+            } else if constexpr (std::is_same_v<T, ArrayType>) {
                 checkType(*t.element_type);
                 if (t.size) {
                     checkExpression(*t.size);
                 }
-            }
-            else if constexpr (std::is_same_v<T, RecordType>) {
+                if (std::holds_alternative<std::string>(*t.element_type)) {
+                    const auto& type_name = std::get<std::string>(*t.element_type);
+                    table.markTypeUsed(type_name);
+                }
+            } else if constexpr (std::is_same_v<T, RecordType>) {
                 for (const auto& field : t.fields) {
                     if (field->type) {
                         checkType(*field->type);
+                    }
+                    if (std::holds_alternative<std::string>(*field->type)) {
+                        const auto& type_name = std::get<std::string>(*field->type);
+                        table.markTypeUsed(type_name);
                     }
                 }
             }
@@ -201,7 +227,7 @@ private:
 
     void checkBlock(const Block& block) {
         table.pushScope();
-        
+        table.setCurrentBlock(&block);
         for (const auto& element : block) {
             std::visit([this](const auto& elem) {
                 using T = std::decay_t<decltype(elem)>;
@@ -215,17 +241,58 @@ private:
                     if (elem.value) {
                         checkExpression(*elem.value);
                     }
-                }
-                else if constexpr (std::is_same_v<T, TypeDeclaration>) {
+                } else if constexpr (std::is_same_v<T, TypeDeclaration>) {
                     checkType(elem.type);
-                }
-                else if constexpr (std::is_same_v<T, Statement>) {
+                } else if constexpr (std::is_same_v<T, Statement>) {
                     checkStatement(elem);
                 }
             }, element);
         }
-        
+        table.saveBlockVarUsage(block);
         table.popScope();
+    }
+
+    Block optimizeBlock(Block& block) { //NOLINT(*complexity*)
+        Block optimized;
+        bool found_return = false;
+        
+        auto block_usage_it = table.block_var_usage.find(&block);
+        if (block_usage_it == table.block_var_usage.end()) {
+            return block;
+        }
+        
+        const auto& variable_usage = block_usage_it->second;
+        
+        for (auto& element : block) {
+            if (found_return) {
+                continue;
+            }
+            
+            std::visit([&](auto& elem) {
+                using T = std::decay_t<decltype(elem)>;
+                
+                if constexpr (std::is_same_v<T, VariableDeclaration>) {
+                    if (variable_usage.contains(elem.identifier) && variable_usage.at(elem.identifier)) { // probably should include || elem.value, cuz Expression in value can be impure
+                        optimized.push_back(elem);
+                    }
+                } else if constexpr (std::is_same_v<T, Statement>) {
+                    auto optimized_statement = optimizeStatement(elem);
+                    if (optimized_statement) {
+                        optimized.push_back(*optimized_statement);
+                        
+                        if (std::holds_alternative<ReturnStatement>(*optimized_statement)) {
+                            found_return = true;
+                        }
+                    }
+                } else if constexpr (std::is_same_v<T, TypeDeclaration>) {
+                    if (table.types.contains(elem.identifier) && table.types.at(elem.identifier)) {
+                        optimized.push_back(elem);
+                    }
+                }
+            }, element);
+        }
+        
+        return optimized;
     }
 
     void checkStatement(const Statement& stmt) {
@@ -234,35 +301,52 @@ private:
             
             if constexpr (std::is_same_v<T, AssignmentStatement>) {
                 checkAssignment(statement);
-            }
-            else if constexpr (std::is_same_v<T, WhileStatement>) {
+            } else if constexpr (std::is_same_v<T, WhileStatement>) {
                 checkExpression(statement.condition);
                 checkBlock(statement.body);
-            }
-            else if constexpr (std::is_same_v<T, ForStatement>) {
+            } else if constexpr (std::is_same_v<T, ForStatement>) {
                 checkForStatement(statement);
-            }
-            else if constexpr (std::is_same_v<T, IfStatement>) {
+            } else if constexpr (std::is_same_v<T, IfStatement>) {
                 checkExpression(statement.condition);
                 checkBlock(statement.true_branch);
                 if (statement.false_branch) {
                     checkBlock(*statement.false_branch);
                 }
-            }
-            else if constexpr (std::is_same_v<T, PrintStatement>) {
+            } else if constexpr (std::is_same_v<T, PrintStatement>) {
                 for (const auto& arg : statement.arguments) {
                     if (std::holds_alternative<Expression>(arg)) {
                         checkExpression(std::get<Expression>(arg));
                     }
                 }
-            }
-            else if constexpr (std::is_same_v<T, ReturnStatement>) {
+            } else if constexpr (std::is_same_v<T, ReturnStatement>) {
                 if (statement.value) {
                     checkExpression(*statement.value);
                 }
-            }
-            else if constexpr (std::is_same_v<T, RoutineCall>) {
+            } else if constexpr (std::is_same_v<T, RoutineCall>) {
                 checkRoutineCall(statement);
+            }
+        }, stmt);
+    }
+
+    std::optional<Statement> optimizeStatement(Statement& stmt) {
+        return std::visit([&](auto& statement) -> std::optional<Statement> {
+            using T = std::decay_t<decltype(statement)>;
+            
+            if constexpr (std::is_same_v<T, WhileStatement>) {
+                auto optimized_body = optimizeBlock(statement.body);
+                return WhileStatement{{statement.span}, statement.condition, optimized_body};
+            } else if constexpr (std::is_same_v<T, ForStatement>) {
+                auto optimized_body = optimizeBlock(statement.body);
+                return ForStatement{{statement.span}, statement.counter, statement.range, optimized_body, statement.is_reversed};
+            } else if constexpr (std::is_same_v<T, IfStatement>) {
+                auto optimized_then = optimizeBlock(statement.true_branch);
+                std::optional<Block> optimized_else;
+                if (statement.false_branch) {
+                    optimized_else = optimizeBlock(*statement.false_branch);
+                }
+                return IfStatement{{statement.span}, statement.condition, optimized_then, optimized_else};
+            } else {
+                return statement;
             }
         }, stmt);
     }
@@ -318,6 +402,16 @@ private:
         table.popScope();
     }
 
+    void optimizeRoutine(RoutineDeclaration& routine) {
+        if (!routine.body) return;
+        
+        if (std::holds_alternative<Block>(*routine.body)) {
+            auto& block = std::get<Block>(*routine.body);
+            auto optimized_block = optimizeBlock(block);
+            routine.body = optimized_block;
+        }
+    }
+    
     void checkForwardDeclarations() {
         for (const auto& [identifier, routine_pair] : table.routines) {
             if (!routine_pair.first.second) {
@@ -326,17 +420,37 @@ private:
         }
     }
 
-public:
-    explicit SemanticAnalyzer(Program& program) : program{program} {
-        table = SymbolTable{};
+    void optimizeProgram() {
+        table.routines.at("main").second = true;
+        auto it = program.declarations.begin();
+        while (it != program.declarations.end()) {
+            if (std::holds_alternative<VariableDeclaration>(*it)) {
+                const auto& var_decl = std::get<VariableDeclaration>(*it);
+                if (!table.variables.at(var_decl.identifier)) {
+                    it = program.declarations.erase(it);
+                    continue;
+                }
+            }
+            if (std::holds_alternative<TypeDeclaration>(*it)) {
+                const auto& type_decl = std::get<TypeDeclaration>(*it);
+                if (!table.types.at(type_decl.identifier)) {
+                    it = program.declarations.erase(it);
+                    continue;
+                }
+            }
+            if (std::holds_alternative<RoutineDeclaration>(*it)) {
+                auto& routine_decl = std::get<RoutineDeclaration>(*it);
+                if (!table.routines.at(routine_decl.identifier).second) {
+                    it = program.declarations.erase(it);
+                    continue;
+                }
+                optimizeRoutine(routine_decl);
+            }
+            ++it;
+        }
     }
 
-    void analysisOptimization() {
-        table.routines["main"].second = true;
-
-    }
-
-    std::optional<SemanticError> analysisChecks() { //NOLINT(*complexity*)
+    std::optional<SemanticError> checkProgram() { //NOLINT(*complexity*)
         try {
             table.pushScope();
             
@@ -356,21 +470,25 @@ public:
                         if (d.value){
                             checkExpression(*d.value);
                         }
-                    }
-                    else if constexpr (std::is_same_v<T, TypeDeclaration>) {
+                    } else if constexpr (std::is_same_v<T, TypeDeclaration>) {
                         if (table.types.contains(d.identifier)) {
                             throw SemanticError{"Duplicate type declaration: " + d.identifier, d.span};
                         }
                         table.types[d.identifier] = false;
                         checkType(d.type);
-                    }
-                    else if constexpr (std::is_same_v<T, RoutineDeclaration>) {
+                    } else if constexpr (std::is_same_v<T, RoutineDeclaration>) {
                         auto it = table.routines.find(d.identifier);
-                        if (it != table.routines.end() && it->second.second) {
-                            throw SemanticError{"Duplicate routine declaration: " + d.identifier, d.span};
+                        if (it != table.routines.end()) {
+                            if (it->second.first.second && d.body){
+                                throw SemanticError{"Duplicate routine declaration: " + d.identifier, d.span};
+                            }
+                            if (d.body) {
+                                it->second.first.second = true;
+                            }
+                        } else {
+                            bool is_defined = static_cast<bool>(d.body);
+                            table.routines[d.identifier] = {{d, is_defined}, false};
                         }
-                        bool is_defined = static_cast<bool>(d.body);
-                        table.routines[d.identifier] = {{d, is_defined}, false};
                         checkRoutineDeclaration(d);
                     }
                 }, decl);
@@ -386,19 +504,26 @@ public:
         return std::nullopt;
     }
 
-    std::expected<Program, SemanticError> analyzeProgram() {
-        auto error = analysisChecks();
+    
+
+public:
+    explicit SemanticAnalyzer(Program& program) : program{program} {
+        table = SymbolTable{};
+    }
+
+    std::expected<Program, SemanticError> analyze() {
+        auto error = checkProgram();
         if (error) {
             return std::unexpected{*error};
         }
-        analysisOptimization();
+        optimizeProgram();
         return program;
     }
 };
 
 std::expected<Program, SemanticError> analyze(Program& ast) {
     SemanticAnalyzer analyzer{ast};
-    return analyzer.analyzeProgram();
+    return analyzer.analyze();
 }
 
 } // namespace analyzer

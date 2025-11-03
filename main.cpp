@@ -122,7 +122,7 @@ int main(int argc, const char** argv) {
         return EXIT_FAILURE;
     }
 
-    // print_tree(*ast);
+    
     
     std::expected<Program, SemanticError> analysis_result = analyze(*ast);
     if (!analysis_result) {
@@ -131,6 +131,7 @@ int main(int argc, const char** argv) {
         // handleSemanticError(analysis_result.error(), filename, program_text);
         return EXIT_FAILURE;
     }
+    print_tree(*ast);
     
     return EXIT_SUCCESS;
 }

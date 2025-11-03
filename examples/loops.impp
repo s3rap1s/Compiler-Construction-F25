@@ -8,8 +8,7 @@ routine main() is
     for i in 1..3 loop
         print arr[i]
     end
-    var a is 0
-    var res is sum(a)
+    
     for i in 1..3 reverse loop
         print arr[i]
     end

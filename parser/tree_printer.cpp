@@ -87,6 +87,7 @@ public:
             std::visit([this](const auto& b) { this->print(b); }, *decl.body);
             indent_level--;
         }
+        newline();
     }
 
     // Types
