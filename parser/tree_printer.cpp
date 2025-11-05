@@ -22,7 +22,7 @@ class TreePrinter {
 
     void print_indent() {
         for (int i = 0; i < indent_level; ++i) {
-            out << "   ";
+            out << "    ";
         }
     }
 

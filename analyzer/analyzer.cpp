@@ -26,14 +26,19 @@ class SemanticAnalyzer {
 private:
     class SymbolTable{
         public:
-        std::unordered_map<std::string, bool> variables;
-        std::unordered_map<std::string, bool> types;
+
+        class LocalScope{
+            public:
+            std::unordered_map<std::string, std::pair<std::optional<Type>, bool>> variables;
+            std::unordered_map<std::string, std::pair<Type, bool>> types;
+        };
+
         std::unordered_map<std::string, std::pair<std::pair<RoutineDeclaration, bool>, bool>> routines;
         
-        std::vector<std::unordered_map<std::string, bool>> local_scopes;
+        std::vector<LocalScope> local_scopes;
         std::vector<std::string> for_loop_variables;
 
-        std::unordered_map<const Block*, std::unordered_map<std::string, bool>> block_var_usage;
+        std::unordered_map<const Block*, LocalScope> block_usage;
         const Block* current_block = nullptr;
         
         
@@ -45,39 +50,91 @@ private:
             local_scopes.pop_back();
         }
         
-        bool varExists(const std::string& identifier) const {
-            for (const auto& local_scope : std::ranges::reverse_view(local_scopes)) {
-                if (local_scope.contains(identifier)) {
+        bool varExists(const ModifiablePrimary& mp) const {
+            for (const auto& local_scope : std::ranges::reverse_view(local_scopes)){
+                if (local_scope.variables.contains(mp.variable)){
                     return true;
                 }
             }
-            return variables.contains(identifier);
+            throw SemanticError{"Undeclared variable: " + mp.variable, mp.span};
         }
         
-        void addLocalVar(const std::string& identifier) {
-            if (!local_scopes.empty()) {
-                local_scopes.back()[identifier] = false;
+        void addLocalVar(const VariableDeclaration& vd) {
+            if (local_scopes.back().variables.contains(vd.identifier)){
+                throw SemanticError{"Duplicate variable declaration: " + vd.identifier, vd.span};
             }
+            local_scopes.back().variables[vd.identifier] = {vd.type, false};
         }
 
         void markVarUsed(const std::string& identifier){
             for (auto& local_scope: std::ranges::reverse_view(local_scopes)){
-                if (local_scope.contains(identifier)) {
-                    local_scope[identifier] = true;
+                if (local_scope.variables.contains(identifier)) {
+                    local_scope.variables[identifier].second = true;
                     if (current_block){
-                        block_var_usage[current_block][identifier] = true;
+                        block_usage[current_block].variables[identifier].second = true;
                     }
                     return;
                 }
             }
-            if (variables.contains(identifier)){
-                variables[identifier] = true;
+        }
+
+        bool typeExists(const Type& type) const {
+            if (std::holds_alternative<std::string>(type)){
+                const std::string type_str = std::get<std::string>(type);
+                for (const auto& local_scope : std::ranges::reverse_view(local_scopes)){
+                    if (local_scope.types.contains(type_str)){
+                        return true;
+                    }
+                }
+                throw SemanticError{"Undeclared type: " + type_str, {.begin=0, .end=0, .line_no=0, .column_no=0}}; // TODO: add span to type
             }
+            return true;
+        }
+
+        Type getVariableType(const ModifiablePrimary& mp) {
+            for (const auto& local_scope : std::ranges::reverse_view(local_scopes)) {
+                if (local_scope.variables.contains(mp.variable) && local_scope.variables.at(mp.variable).first) {
+                    return *local_scope.variables.at(mp.variable).first;
+                }
+            }
+            throw SemanticError{"Undeclared variablee: " + mp.variable, mp.span};
+        }
+
+        Type resolveType(Type type) {
+            while (std::holds_alternative<std::string>(type)) {
+                const std::string& type_name = std::get<std::string>(type);
+                bool found = false;
+                
+                for (const auto& local_scope : std::ranges::reverse_view(local_scopes)) {
+                    if (local_scope.types.contains(type_name)) {
+                        type = local_scope.types.at(type_name).first;
+                        found = true;
+                        break;
+                    }
+                }
+                if (!found) {
+                    throw SemanticError{"Undeclared type: " + type_name, {}};
+                }
+            }
+            return type;
+        }
+        
+        void addLocalType(const TypeDeclaration& td) {
+            if (local_scopes.back().types.contains(td.identifier)){
+                throw SemanticError{"Duplicate type declaration: " + td.identifier, td.span};
+            }
+            local_scopes.back().types[td.identifier] = {td.type, false};
         }
 
         void markTypeUsed(const std::string& identifier) {
-            if (types.contains(identifier)) {
-                types[identifier] = true;
+            for (auto& local_scope: std::ranges::reverse_view(local_scopes)){
+                if (local_scope.types.contains(identifier)) {
+                    local_scope.types[identifier].second = true;
+                    if (current_block){
+                        block_usage[current_block].types[identifier].second = true;
+                    }
+                    return;
+                }
             }
         }
 
@@ -89,19 +146,20 @@ private:
 
         void setCurrentBlock(const Block* ptr){
             current_block = ptr;
-            if (ptr && !block_var_usage.contains(ptr)){
-                block_var_usage[ptr] = {};
+            if (ptr && !block_usage.contains(ptr)){
+                block_usage[ptr] = {};
             }
         }
 
-        void saveBlockVarUsage(const Block& block) {
-            if (!local_scopes.empty()) {
-                auto& current_scope = local_scopes.back();
-                auto& block_usage = block_var_usage[&block];
+        void saveBlockUsage(const Block& block) {
+            auto& current_scope = local_scopes.back();
+            auto& block_usage_cur = block_usage[&block];
                 
-                for (const auto& [var_name, used] : current_scope) {
-                    block_usage[var_name] = used;
-                }
+            for (const auto& [var, used] : current_scope.variables) {
+                block_usage_cur.variables[var] = used;
+            }
+            for (const auto& [type, used] : current_scope.types) {
+                block_usage_cur.types[type] = used;
             }
         }
     }; 
@@ -165,17 +223,66 @@ private:
     }
 
     void checkModifiablePrimary(const ModifiablePrimary& mp) {
-        if (!table.varExists(mp.variable)) {
-            throw SemanticError{"Undeclared variable: " + mp.variable, mp.span};
-        }
-        table.markVarUsed(mp.variable);        
-
-        for (const auto& accessor : mp.accessors) {
-            if (std::holds_alternative<Expression>(accessor)) {
-                checkExpression(std::get<Expression>(accessor));
+        table.varExists(mp);
+        table.markVarUsed(mp.variable);  
+        if (!mp.accessors.empty()){
+            auto current_type = table.getVariableType(mp);
+            for (const auto& accessor : mp.accessors){
+                current_type = checkAccessor(current_type, accessor, mp.span);
             }
-        }
+        }      
     }
+
+    Type checkAccessor(Type current_type, const std::variant<Expression, std::string>& accessor, const Span& span) { //NOLINT(*complexity*)
+        current_type = table.resolveType(current_type);
+        if (std::holds_alternative<std::string>(accessor)) {
+            const auto& field_name = std::get<std::string>(accessor);
+
+            if (std::holds_alternative<ArrayType>(current_type)) {
+                if (field_name == "length") {
+                    if (field_name == "length") {
+                        return IntegerType{};
+                    }
+                    throw SemanticError{"Array has no field named '" + field_name + "'", span};
+                }
+            }
+            if (!std::holds_alternative<RecordType>(current_type)) {
+                throw SemanticError{"Cannot access field '" + field_name + "' on non-record type", span};
+            }
+            
+            const auto& record = std::get<RecordType>(current_type);
+            bool field_found = false;
+            
+            for (const auto& field : record.fields) {
+                if (field->identifier == field_name) {
+                    if (!field->type) {
+                        // TODO: deduce type of the field here
+                    } else {
+                        field_found = true;
+                        return *field->type;
+                    }
+                    
+                }
+            }
+            
+            if (!field_found) {
+                throw SemanticError{"Record has no field named '" + field_name + "'", span};
+            }
+        } else {
+            if (!std::holds_alternative<ArrayType>(current_type)) {
+                throw SemanticError{"Cannot index non-array type", span};
+            }
+            
+            const auto& index_expr = std::get<Expression>(accessor);
+            checkExpression(index_expr);
+            current_type = table.resolveType(current_type);
+            const auto& array = std::get<ArrayType>(current_type);
+            return *array.element_type;
+        }
+        
+        throw SemanticError{"Invalid accessor", span};
+    }
+
 
     void checkRoutineCall(const RoutineCall& call) {
         auto routine_it = table.routines.find(call.name);
@@ -201,6 +308,7 @@ private:
             using T = std::decay_t<decltype(t)>;
             
             if constexpr (std::is_same_v<T, std::string>) {
+                table.typeExists(t);
                 table.markTypeUsed(t);
             } else if constexpr (std::is_same_v<T, ArrayType>) {
                 checkType(*t.element_type);
@@ -233,7 +341,7 @@ private:
                 using T = std::decay_t<decltype(elem)>;
                 
                 if constexpr (std::is_same_v<T, VariableDeclaration>) {
-                    table.addLocalVar(elem.identifier);
+                    table.addLocalVar(elem);
                     
                     if (elem.type) {
                         checkType(*elem.type);
@@ -242,13 +350,14 @@ private:
                         checkExpression(*elem.value);
                     }
                 } else if constexpr (std::is_same_v<T, TypeDeclaration>) {
+                    table.addLocalType(elem);
                     checkType(elem.type);
                 } else if constexpr (std::is_same_v<T, Statement>) {
                     checkStatement(elem);
                 }
             }, element);
         }
-        table.saveBlockVarUsage(block);
+        table.saveBlockUsage(block);
         table.popScope();
     }
 
@@ -256,23 +365,23 @@ private:
         Block optimized;
         bool found_return = false;
         
-        auto block_usage_it = table.block_var_usage.find(&block);
-        if (block_usage_it == table.block_var_usage.end()) {
+        auto block_usage_it = table.block_usage.find(&block);
+        if (block_usage_it == table.block_usage.end()) {
             return block;
         }
         
-        const auto& variable_usage = block_usage_it->second;
+        const auto& variable_usage = block_usage_it->second.variables;
+        const auto& type_usage = block_usage_it->second.types;
         
         for (auto& element : block) {
             if (found_return) {
                 continue;
             }
-            
             std::visit([&](auto& elem) {
                 using T = std::decay_t<decltype(elem)>;
                 
                 if constexpr (std::is_same_v<T, VariableDeclaration>) {
-                    if (variable_usage.contains(elem.identifier) && variable_usage.at(elem.identifier)) { // probably should include || elem.value, cuz Expression in value can be impure
+                    if (variable_usage.contains(elem.identifier) && variable_usage.at(elem.identifier).second) { // probably should include || elem.value, cuz Expression in value can be impure
                         optimized.push_back(elem);
                     }
                 } else if constexpr (std::is_same_v<T, Statement>) {
@@ -285,7 +394,7 @@ private:
                         }
                     }
                 } else if constexpr (std::is_same_v<T, TypeDeclaration>) {
-                    if (table.types.contains(elem.identifier) && table.types.at(elem.identifier)) {
+                    if (type_usage.contains(elem.identifier) && type_usage.at(elem.identifier).second) {
                         optimized.push_back(elem);
                     }
                 }
@@ -363,7 +472,7 @@ private:
 
     void checkForStatement(const ForStatement& for_stmt) {
         table.pushScope();
-        table.addLocalVar(for_stmt.counter);
+        table.addLocalVar(VariableDeclaration{for_stmt.counter, IntegerType{{0, 0, 0, 0}}, std::nullopt}); // TODO: add span to for counter
         table.markVarUsed(for_stmt.counter);
         table.for_loop_variables.push_back(for_stmt.counter);
         
@@ -387,7 +496,7 @@ private:
         table.pushScope();
         
         for (const auto& param : routine.parameters) {
-            table.addLocalVar(param.identifier);
+            table.addLocalVar(VariableDeclaration{param.identifier, param.type, std::nullopt});
             checkType(param.type);
         }
         if (routine.return_type){
@@ -426,14 +535,14 @@ private:
         while (it != program.declarations.end()) {
             if (std::holds_alternative<VariableDeclaration>(*it)) {
                 const auto& var_decl = std::get<VariableDeclaration>(*it);
-                if (!table.variables.at(var_decl.identifier)) {
+                if (!table.local_scopes.front().variables.at(var_decl.identifier).second) {
                     it = program.declarations.erase(it);
                     continue;
                 }
             }
             if (std::holds_alternative<TypeDeclaration>(*it)) {
                 const auto& type_decl = std::get<TypeDeclaration>(*it);
-                if (!table.types.at(type_decl.identifier)) {
+                if (!table.local_scopes.front().types.at(type_decl.identifier).second) {
                     it = program.declarations.erase(it);
                     continue;
                 }
@@ -459,11 +568,7 @@ private:
                     using T = std::decay_t<decltype(d)>;
                     
                     if constexpr (std::is_same_v<T, VariableDeclaration>) {
-                        if (table.variables.find(d.identifier) != table.variables.end()) {
-                            throw SemanticError{"Duplicate variable declaration: " + d.identifier, d.span};
-                        }
-                        table.variables[d.identifier] = false;
-                        table.addLocalVar(d.identifier);
+                        table.addLocalVar(d);
                         if (d.type){
                             checkType(*d.type);
                         }
@@ -471,10 +576,7 @@ private:
                             checkExpression(*d.value);
                         }
                     } else if constexpr (std::is_same_v<T, TypeDeclaration>) {
-                        if (table.types.contains(d.identifier)) {
-                            throw SemanticError{"Duplicate type declaration: " + d.identifier, d.span};
-                        }
-                        table.types[d.identifier] = false;
+                        table.addLocalType(d);
                         checkType(d.type);
                     } else if constexpr (std::is_same_v<T, RoutineDeclaration>) {
                         auto it = table.routines.find(d.identifier);
@@ -496,7 +598,6 @@ private:
 
             checkForwardDeclarations();
             
-            table.popScope();
             
         } catch (const SemanticError& error) {
             return error;
