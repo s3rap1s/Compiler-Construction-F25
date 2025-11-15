@@ -228,26 +228,24 @@ private:
         if (!mp.accessors.empty()){
             auto current_type = table.getVariableType(mp);
             for (const auto& accessor : mp.accessors){
-                current_type = checkAccessor(current_type, accessor, mp.span);
+                current_type = checkAccessor(mp, current_type, accessor);
             }
         }      
     }
 
-    Type checkAccessor(Type current_type, const std::variant<Expression, std::string>& accessor, const Span& span) { //NOLINT(*complexity*)
+    Type checkAccessor(const ModifiablePrimary& mp, Type current_type, const std::variant<Expression, std::string>& accessor) { //NOLINT(*complexity*)
         current_type = table.resolveType(current_type);
         if (std::holds_alternative<std::string>(accessor)) {
             const auto& field_name = std::get<std::string>(accessor);
 
             if (std::holds_alternative<ArrayType>(current_type)) {
-                if (field_name == "length") {
-                    if (field_name == "length") {
-                        return IntegerType{};
-                    }
-                    throw SemanticError{"Array has no field named '" + field_name + "'", span};
+                if (field_name == "size") {
+                    return IntegerType{};
                 }
+                throw SemanticError{"Variable " + mp.variable + " has no field named '" + field_name + "'", mp.span};
             }
             if (!std::holds_alternative<RecordType>(current_type)) {
-                throw SemanticError{"Cannot access field '" + field_name + "' on non-record type", span};
+                 throw SemanticError{"Cannot access field '" + field_name + "' on non-record type", mp.span};
             }
             
             const auto& record = std::get<RecordType>(current_type);
@@ -266,11 +264,11 @@ private:
             }
             
             if (!field_found) {
-                throw SemanticError{"Record has no field named '" + field_name + "'", span};
+                throw SemanticError{mp.variable + " has no field '" + field_name + "'", mp.span};
             }
         } else {
             if (!std::holds_alternative<ArrayType>(current_type)) {
-                throw SemanticError{"Cannot index non-array type", span};
+                throw SemanticError{"Cannot index non-array type", mp.span};
             }
             
             const auto& index_expr = std::get<Expression>(accessor);
@@ -280,7 +278,7 @@ private:
             return *array.element_type;
         }
         
-        throw SemanticError{"Invalid accessor", span};
+        throw SemanticError{"Invalid accessor", mp.span};
     }
 
 
@@ -375,14 +373,13 @@ private:
         
         for (auto& element : block) {
             if (found_return) {
-                continue;
+                break;
             }
             std::visit([&](auto& elem) {
                 using T = std::decay_t<decltype(elem)>;
                 
                 if constexpr (std::is_same_v<T, VariableDeclaration>) {
-                    if (variable_usage.contains(elem.identifier) && variable_usage.at(elem.identifier).second) { // probably should include || elem.value, cuz Expression in value can be impure
-                        optimized.push_back(elem);
+                    if ((variable_usage.contains(elem.identifier) && variable_usage.at(elem.identifier).second) || elem.value) {
                     }
                 } else if constexpr (std::is_same_v<T, Statement>) {
                     auto optimized_statement = optimizeStatement(elem);

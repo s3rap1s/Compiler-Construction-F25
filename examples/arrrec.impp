@@ -15,7 +15,6 @@ routine main() is
     c.points[1].y := 2
     c.points[2].x := 3
     c.points[2].y := 4
-    
     print c.points[1].x
     print c.points[1].y
     print c.points[2].x
