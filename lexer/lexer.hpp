@@ -34,12 +34,12 @@ class Lexer {
     void advance();
 
   public:
-    using ResultType = std::expected<Token, LexingError>;
+    using LexingResult = std::expected<Token, LexingError>;
 
     explicit Lexer(std::string file) : file{std::move(file)} {}
 
     // nullopt is end of stream
-    std::optional<ResultType> getNextToken();
+    std::optional<LexingResult> getNextToken();
 
     std::string&& getProgramText() &&;
 };

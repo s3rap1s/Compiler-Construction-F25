@@ -60,7 +60,7 @@ using SyntaxPart = lexer::SyntaxPart;
 // NOLINTBEGIN(*-no-recursion)
 class Parser {
     lexer::Lexer& lexer; // NOLINT(*ref-data*)
-    std::optional<lexer::Lexer::ResultType> token_store = std::nullopt;
+    std::optional<lexer::Lexer::LexingResult> token_store = std::nullopt;
     std::string_view entry_point;
     lexer::TokenIterator next_token_it{lexer, token_store}; // initialize after lexer and token store
     Span last_span{};
@@ -275,7 +275,7 @@ class Parser {
             BIND_SET(return_type, parseType());
 
         std::optional<std::variant<Block, Expression>> body;
-        
+
         if (auto keyword = assertKeywords<SyntaxPart::Is, SyntaxPart::Arrow>()) {
             skipToken();
             if (*keyword == SyntaxPart::Is) {
@@ -285,7 +285,7 @@ class Parser {
                 BIND_SET(body, parseExpression());
             }
         }
-        return RoutineDeclaration{{getLastSpan()}, 
+        return RoutineDeclaration{{getLastSpan()},
                                 std::move(id).name,
                                 std::move(params),
                                 std::move(body),
