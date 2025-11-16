@@ -16,7 +16,7 @@
 namespace {
 
 class TreePrinter {
-    std::ostream& out; //NOLINT(*ref-data*)
+    std::ostream& out; // NOLINT(*ref-data*)
     int indent_level = 0;
     bool compact_mode = true;
 
@@ -27,7 +27,7 @@ class TreePrinter {
     }
 
     void newline() {
-        out << "\n";
+        out << '\n';
     }
 
   public:
@@ -83,7 +83,7 @@ class TreePrinter {
             out << " : ";
             printDeduced(*decl.return_type);
         }
-        
+
         if (decl.body) {
             out << ", Body: ";
             newline();
@@ -121,7 +121,7 @@ class TreePrinter {
             for (size_t i = 0; i < record.fields.size(); ++i) {
                 const auto& field = record.fields[i];
                 printDeduced(*field);
-                if (i < record.fields.size() - 1){
+                if (i < record.fields.size() - 1) {
                     out << ", ";
                 }
                 newline();
@@ -156,7 +156,7 @@ class TreePrinter {
 
     // Expressions
     void print(const parser::Expression& expr) {
-        if(expr.rest.empty() && compact_mode){
+        if (expr.rest.empty() && compact_mode) {
             printDeduced(expr.first);
             return;
         }
@@ -170,9 +170,15 @@ class TreePrinter {
             print_indent();
             out << "Operation: ";
             switch (op) {
-                case parser::Expression::Operation::And: out << "AND "; break;
-                case parser::Expression::Operation::Or: out << "OR "; break;
-                case parser::Expression::Operation::Xor: out << "XOR "; break;
+            case parser::Expression::Operation::And:
+                out << "AND ";
+                break;
+            case parser::Expression::Operation::Or:
+                out << "OR ";
+                break;
+            case parser::Expression::Operation::Xor:
+                out << "XOR ";
+                break;
             }
             newline();
             printDeduced(bool_expr);
@@ -185,7 +191,7 @@ class TreePrinter {
     }
 
     void print(const parser::Relation& relation) {
-        if(!relation.second && compact_mode){
+        if (!relation.second && compact_mode) {
             printDeduced(relation.first);
             return;
         }
@@ -199,12 +205,24 @@ class TreePrinter {
             print_indent();
             out << "Operation: ";
             switch (relation.second->first) {
-                case parser::Relation::Operation::Less: out << "< "; break;
-                case parser::Relation::Operation::LessOrEqual: out << "<= "; break;
-                case parser::Relation::Operation::Greater: out << "> "; break;
-                case parser::Relation::Operation::GreaterOrEqual: out << ">= "; break;
-                case parser::Relation::Operation::Equal: out << "= "; break;
-                case parser::Relation::Operation::NotEqual: out << "/= "; break;
+            case parser::Relation::Operation::Less:
+                out << "< ";
+                break;
+            case parser::Relation::Operation::LessOrEqual:
+                out << "<= ";
+                break;
+            case parser::Relation::Operation::Greater:
+                out << "> ";
+                break;
+            case parser::Relation::Operation::GreaterOrEqual:
+                out << ">= ";
+                break;
+            case parser::Relation::Operation::Equal:
+                out << "= ";
+                break;
+            case parser::Relation::Operation::NotEqual:
+                out << "/= ";
+                break;
             }
             newline();
             printDeduced(relation.second->second);
@@ -222,7 +240,7 @@ class TreePrinter {
     }
 
     void print(const parser::NumberExpression& num_expr) {
-        if (num_expr.rest.empty() && compact_mode){
+        if (num_expr.rest.empty() && compact_mode) {
             printDeduced(num_expr.first);
             return;
         }
@@ -236,17 +254,21 @@ class TreePrinter {
             print_indent();
             out << "Operation: ";
             switch (op) {
-                case parser::NumberExpression::Operation::Plus: out << "+ "; break;
-                case parser::NumberExpression::Operation::Minus: out << "- "; break;
+            case parser::NumberExpression::Operation::Plus:
+                out << "+ ";
+                break;
+            case parser::NumberExpression::Operation::Minus:
+                out << "- ";
+                break;
             }
             newline();
             printDeduced(summand);
         }
         indent_level--;
     }
-    
+
     void print(const parser::Summand& summand) {
-        if (summand.rest.empty() && compact_mode){
+        if (summand.rest.empty() && compact_mode) {
             printDeduced(summand.first);
             return;
         }
@@ -255,15 +277,21 @@ class TreePrinter {
         newline();
         indent_level++;
         printDeduced(summand.first);
-        
+
         for (const auto& [op, primary] : summand.rest) {
             newline();
             print_indent();
             out << "Operation: ";
             switch (op) {
-                case parser::Summand::Operation::Multiply: out << " * "; break;
-                case parser::Summand::Operation::Divide: out << " / "; break;
-                case parser::Summand::Operation::Modulo: out << " % "; break;
+            case parser::Summand::Operation::Multiply:
+                out << " * ";
+                break;
+            case parser::Summand::Operation::Divide:
+                out << " / ";
+                break;
+            case parser::Summand::Operation::Modulo:
+                out << " % ";
+                break;
             }
             newline();
             printDeduced(primary);
@@ -294,7 +322,8 @@ class TreePrinter {
         print_indent();
         out << "RoutineCall: " << call.name << "(";
         for (size_t i = 0; i < call.arguments.size(); ++i) {
-            if (i > 0) out << ", ";
+            if (i > 0)
+                out << ", ";
             newline();
             indent_level++;
             printDeduced(call.arguments[i]);
@@ -304,25 +333,35 @@ class TreePrinter {
     }
 
     void print(const parser::ModifiablePrimary& mp) {
-        print_indent();
-        out << "Identifier: " << mp.variable;
-        for (const auto& accessor : mp.accessors) {
-            std::visit([this](const auto& acc) {
-                using T = std::decay_t<decltype(acc)>;
-                if constexpr (std::is_same_v<T, parser::Expression>) {
-                    out << "[";
-                    indent_level++;
-                    newline();
-                    printDeduced(acc);
-                    indent_level--;
-                    newline();
-                    print_indent();
-                    out << "]";
-                } else if constexpr (std::is_same_v<T, std::string>) {
-                    out << "." << acc;
-                }
-            }, accessor);
+        if (mp.accessors.empty()) {
+            print_indent();
+            out << "Identifier: " << mp.variable << '\n';
+            return;
         }
+        print_indent();
+        out << "ModifiablePrimary:\n";
+        indent_level++;
+        print_indent();
+        out << "Identifier: " << mp.variable << '\n';
+        for (const auto& accessor : mp.accessors) {
+            std::visit(
+                [this](const auto& acc) {
+                    using T = std::decay_t<decltype(acc)>;
+                    if constexpr (std::is_same_v<T, parser::Expression>) {
+                        print_indent();
+                        out << "Index:\n";
+                        indent_level++;
+                        printDeduced(acc);
+                        newline();
+                        indent_level--;
+                    } else if constexpr (std::is_same_v<T, std::string>) {
+                        print_indent();
+                        out << "Field: " << acc << '\n';
+                    }
+                },
+                accessor);
+        }
+        indent_level--;
     }
 
     void print(const parser::UnarySign& unary) {
@@ -330,8 +369,12 @@ class TreePrinter {
         print_indent();
         out << "Operation: ";
         switch (unary.sign) {
-            case parser::UnarySign::Sign::Plus: out << "+ "; break;
-            case parser::UnarySign::Sign::Minus: out << "- "; break;
+        case parser::UnarySign::Sign::Plus:
+            out << "+ ";
+            break;
+        case parser::UnarySign::Sign::Minus:
+            out << "- ";
+            break;
         }
         newline();
         printDeduced(*unary.operand);
@@ -429,21 +472,22 @@ class TreePrinter {
         }
         newline();
         indent_level++;
-        std::visit([this](const auto& r) {
-            using T = std::decay_t<decltype(r)>;
-            if constexpr (std::is_same_v<T, parser::Expression>) {
-                printDeduced(r);
-            } else if constexpr (std::is_same_v<T, std::pair<parser::Expression, parser::Expression>>) {
-                printDeduced(r.first);
-                newline();
-                print_indent();
-                out << ".. ";
-                newline();
-                printDeduced(r.second);
-            }
-        }, for_stmt.range);
-        
-        
+        std::visit(
+            [this](const auto& r) {
+                using T = std::decay_t<decltype(r)>;
+                if constexpr (std::is_same_v<T, parser::Expression>) {
+                    printDeduced(r);
+                } else if constexpr (std::is_same_v<T, std::pair<parser::Expression, parser::Expression>>) {
+                    printDeduced(r.first);
+                    newline();
+                    print_indent();
+                    out << ".. ";
+                    newline();
+                    printDeduced(r.second);
+                }
+            },
+            for_stmt.range);
+
         indent_level--;
         newline();
 
@@ -461,16 +505,19 @@ class TreePrinter {
         newline();
         indent_level++;
         for (size_t i = 0; i < print_stmt.arguments.size(); ++i) {
-            if (i > 0) out << ", \n";
-            std::visit([this](const auto& a) {
-                using T = std::decay_t<decltype(a)>;
-                if constexpr (std::is_same_v<T, parser::Expression>) {
-                    printDeduced(a);
-                } else if constexpr (std::is_same_v<T, parser::StringLiteral>) {
-                    print_indent();
-                    out << "\"" << a.value << "\"";
-                }
-            }, print_stmt.arguments[i]);
+            if (i > 0)
+                out << ", \n";
+            std::visit(
+                [this](const auto& a) {
+                    using T = std::decay_t<decltype(a)>;
+                    if constexpr (std::is_same_v<T, parser::Expression>) {
+                        printDeduced(a);
+                    } else if constexpr (std::is_same_v<T, parser::StringLiteral>) {
+                        print_indent();
+                        out << "\"" << a.value << "\"";
+                    }
+                },
+                print_stmt.arguments[i]);
         }
         indent_level--;
     }
@@ -495,7 +542,7 @@ class TreePrinter {
     template <typename Arg>
     using PrintOverload = void (TreePrinter::*)(const Arg&);
 
-    template<typename Arg>
+    template <typename Arg>
     void printDeduced(const Arg& arg) {
         (this->*static_cast<PrintOverload<Arg>>(&TreePrinter::print))(arg);
     }

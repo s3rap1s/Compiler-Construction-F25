@@ -19,4 +19,5 @@ routine main() is
     print c.points[1].y
     print c.points[2].x
     print c.points[2].y
+    print c
 end
