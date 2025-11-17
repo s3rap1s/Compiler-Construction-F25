@@ -3,6 +3,7 @@
 #include <format>
 #include <fstream>
 #include <iostream>
+#include <optional>
 #include <print>
 #include <ranges>
 #include <span>
@@ -11,8 +12,8 @@
 #include <utility>
 #include <variant>
 
-#include "analyzer/semantic_error.hpp"
 #include "analyzer/analyzer.hpp"
+#include "analyzer/semantic_error.hpp"
 #include "lexer/lexer.hpp"
 #include "lexer/lexing_error.hpp"
 #include "lexer/token_printer.hpp"
@@ -116,23 +117,21 @@ int main(int argc, const char** argv) {
     std::string program_text = readFile(file);
 
     Lexer lexer{std::move(program_text)};
-    std::expected<Program, SyntaxError> ast = parse(lexer, entry_point);
+    std::expected<Program, SyntaxError> ast = parse(lexer);
     if (!ast) {
         program_text = std::move(lexer).getProgramText();
         handleSyntaxError(ast.error(), filename, program_text);
         return EXIT_FAILURE;
     }
 
-    
-    
-    std::expected<Program, SemanticError> analysis_result = analyze(*ast);
-    if (!analysis_result) {
+    std::optional<SemanticError> semantic_error = analyze(*ast, entry_point);
+    if (semantic_error) {
         program_text = std::move(lexer).getProgramText();
-        std::cout << analysis_result.error().what;
+        std::cout << semantic_error->what;
         // handleSemanticError(analysis_result.error(), filename, program_text);
         return EXIT_FAILURE;
     }
     print_tree(*ast);
-    
+
     return EXIT_SUCCESS;
 }

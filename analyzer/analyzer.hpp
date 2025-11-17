@@ -1,12 +1,13 @@
 #pragma once
 
-#include "parser/declarations.hpp"
 #include "analyzer/semantic_error.hpp"
+#include "parser/declarations.hpp"
 
-#include <expected>
+#include <optional>
+#include <string_view>
 
 namespace analyzer {
 
-std::expected<parser::Program, SemanticError> analyze(parser::Program& ast);
+std::optional<SemanticError> analyze(parser::Program& ast, std::string_view entry_point);
 
 } // namespace analyzer

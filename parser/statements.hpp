@@ -15,15 +15,24 @@ struct ForStatement;
 struct IfStatement;
 struct PrintStatement;
 struct ReturnStatement;
-using Statement = std::variant<AssignmentStatement, RoutineCall, WhileStatement, ForStatement, IfStatement, PrintStatement, ReturnStatement>;
+struct NoopStatement {};
+using Statement = std::variant<AssignmentStatement,
+                               RoutineCall,
+                               WhileStatement,
+                               ForStatement,
+                               IfStatement,
+                               PrintStatement,
+                               ReturnStatement,
+                               NoopStatement>;
 
 struct VariableDeclaration;
 struct TypeDeclaration;
 using Block = std::vector<std::variant<VariableDeclaration, TypeDeclaration, Statement>>;
+// Why declarations are not considered statements?
 
 using StringLiteral = lexer::StringLiteral;
 
-struct AssignmentStatement : AstNode { //NOLINT(*init*)
+struct AssignmentStatement : AstNode { // NOLINT(*init*)
     ModifiablePrimary target;
     Expression expression;
 };
@@ -50,7 +59,7 @@ struct PrintStatement : AstNode {
     std::vector<std::variant<Expression, StringLiteral>> arguments;
 };
 
-struct ReturnStatement : AstNode { //NOLINT(*init*)
+struct ReturnStatement : AstNode { // NOLINT(*init*)
     std::optional<Expression> value;
 };
 

@@ -23,7 +23,7 @@ using Primary = std::variant<IntegerLiteral,
                              RoutineCall,
                              ModifiablePrimary,
                              UnarySign,
-                             std::shared_ptr<Expression>>;
+                             std::unique_ptr<Expression>>;
 
 struct RoutineCall : AstNode {
     std::string name;
@@ -41,7 +41,7 @@ struct UnarySign : AstNode {
         Minus,
     };
 
-    std::shared_ptr<Primary> operand;
+    std::unique_ptr<Primary> operand;
     Sign sign;
 };
 

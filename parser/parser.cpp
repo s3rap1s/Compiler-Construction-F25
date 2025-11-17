@@ -17,7 +17,6 @@
 #include <iterator>
 #include <memory>
 #include <optional>
-#include <string_view>
 #include <utility>
 #include <variant>
 #include <vector>
@@ -61,8 +60,8 @@ using SyntaxPart = lexer::SyntaxPart;
 class Parser {
     lexer::Lexer& lexer; // NOLINT(*ref-data*)
     std::optional<lexer::Lexer::LexingResult> token_store = std::nullopt;
-    std::string_view entry_point;
-    lexer::TokenIterator next_token_it{lexer, token_store}; // initialize after lexer and token store
+    lexer::TokenIterator next_token_it{lexer, token_store}; // initialize after lexer and token_store fields
+
     Span last_span{};
     bool newline_encountered = false;
 
@@ -203,9 +202,6 @@ class Parser {
                 program.declarations.emplace_back(std::move(td));
             } else if (keyword == SyntaxPart::Routine) {
                 BIND(rd, parseRoutineDeclaration());
-                if (rd.identifier == entry_point){
-                    program.entry_point = rd;
-                }
                 program.declarations.emplace_back(std::move(rd));
             } else {
                 std::unreachable();
@@ -254,7 +250,7 @@ class Parser {
         BIND(id, consumeToken<lexer::Identifier>());
 
         BIND_VOID(consumeKeyword<SyntaxPart::OpenParenthesis>());
-        std::vector<ParameterDecalration> params;
+        std::vector<ParameterDeclaration> params;
         if (!consumeKeyword<SyntaxPart::CloseParenthesis>()) {
             while (true) {
                 BIND(param_id, consumeToken<lexer::Identifier>());
@@ -285,11 +281,8 @@ class Parser {
                 BIND_SET(body, parseExpression());
             }
         }
-        return RoutineDeclaration{{getLastSpan()},
-                                std::move(id).name,
-                                std::move(params),
-                                std::move(body),
-                               std::move(return_type)};
+        return RoutineDeclaration{
+            {getLastSpan()}, std::move(id).name, std::move(params), std::move(body), std::move(return_type)};
     }
 
     ParsingExpected<Type> parseType() {
@@ -336,7 +329,9 @@ class Parser {
         BIND_VOID(consumeKeyword<SyntaxPart::CloseBracket>());
         BIND(type, parseType());
         return ArrayType{
-            {getLastSpan()}, std::move(size),std::make_shared<Type>(std::move(type)),
+            {getLastSpan()},
+            std::move(size),
+            std::make_unique<Type>(std::move(type)),
         };
     }
 
@@ -345,7 +340,7 @@ class Parser {
         RecordType record{{getLastSpan()}, {}};
         while (!consumeKeyword<SyntaxPart::End>()) {
             BIND(var, parseVariableDeclaration());
-            record.fields.push_back(std::make_shared<VariableDeclaration>(var));
+            record.fields.push_back(std::move(var));
         }
         return record;
     }
@@ -456,7 +451,7 @@ class Parser {
         if (consumeKeyword<SyntaxPart::OpenParenthesis>()) {
             BIND(expr, parseExpression());
             BIND_VOID(consumeKeyword<SyntaxPart::CloseParenthesis>());
-            return std::make_shared<Expression>(std::move(expr));
+            return std::make_unique<Expression>(std::move(expr));
         }
 
         if (auto lit = consumeLiteral<lexer::IntegerLiteral>())
@@ -469,8 +464,8 @@ class Parser {
         if (auto sign = consumeKeywords<SyntaxPart::Plus, SyntaxPart::Minus>()) {
             BIND(operand, parsePrimary());
             return UnarySign{{getLastSpan()},
-                            std::make_shared<Primary>(std::move(operand)),
-                            sign == SyntaxPart::Plus ? UnarySign::Sign::Plus : UnarySign::Sign::Minus};
+                             std::make_unique<Primary>(std::move(operand)),
+                             sign == SyntaxPart::Plus ? UnarySign::Sign::Plus : UnarySign::Sign::Minus};
         }
 
         return makeError(getLastSpan(), PrimaryExpressionExpected{});
@@ -593,9 +588,7 @@ class Parser {
         BIND(target, parseModifablePrimary(std::move(base)));
         BIND_VOID(consumeKeyword<SyntaxPart::Assignment>());
         BIND(expr, parseExpression());
-        return AssignmentStatement{{getLastSpan()},
-                            std::move(target),
-                            std::move(expr)};
+        return AssignmentStatement{{getLastSpan()}, std::move(target), std::move(expr)};
     }
 
     ParsingExpected<WhileStatement> parseWhileLoop() {
@@ -604,9 +597,7 @@ class Parser {
         BIND_VOID(consumeKeyword<SyntaxPart::Loop>());
         BIND(body, parseBlock());
         BIND_VOID(consumeKeyword<SyntaxPart::End>());
-        return WhileStatement{{getLastSpan()},
-                                std::move(condition),
-                                std::move(body)};
+        return WhileStatement{{getLastSpan()}, std::move(condition), std::move(body)};
     }
 
     ParsingExpected<ForStatement> parseForLoop() {
@@ -626,17 +617,14 @@ class Parser {
         BIND_VOID(consumeKeyword<SyntaxPart::End>());
 
         if (second_expr) {
-            return ForStatement{{getLastSpan()},
-                                std::move(counter).name,
-                                decltype(ForStatement::range)(std::in_place_index<1>, std::move(first_expr), std::move(*second_expr)),
-                                std::move(body),
-                                reversed};
+            return ForStatement{
+                {getLastSpan()},
+                std::move(counter).name,
+                decltype(ForStatement::range)(std::in_place_index<1>, std::move(first_expr), std::move(*second_expr)),
+                std::move(body),
+                reversed};
         }
-        return ForStatement{{getLastSpan()},
-                            std::move(counter).name,
-                            std::move(first_expr),
-                            std::move(body),
-                            reversed};
+        return ForStatement{{getLastSpan()}, std::move(counter).name, std::move(first_expr), std::move(body), reversed};
     }
 
     ParsingExpected<IfStatement> parseIfStatement() {
@@ -651,10 +639,7 @@ class Parser {
             BIND_SET(false_branch, parseBlock());
 
         BIND_VOID(consumeKeyword<SyntaxPart::End>());
-        return IfStatement{{getLastSpan()},
-                            std::move(condition),
-                            std::move(true_branch),
-                            std::move(false_branch)};
+        return IfStatement{{getLastSpan()}, std::move(condition), std::move(true_branch), std::move(false_branch)};
     }
 
     ParsingExpected<PrintStatement> parsePrintStatement() {
@@ -689,12 +674,11 @@ class Parser {
         if (!assertSeparator()) {
             BIND_SET(value, parseExpression());
         }
-        return ReturnStatement{{getLastSpan()},
-                                std::move(value)};
+        return ReturnStatement{{getLastSpan()}, std::move(value)};
     }
 
   public:
-    explicit Parser(lexer::Lexer& lexer, std::string_view entry_point) : lexer{lexer}, entry_point{entry_point} {}
+    explicit Parser(lexer::Lexer& lexer) : lexer{lexer} {}
 
     std::expected<Program, SyntaxError> parse() {
         return parseProgram();
@@ -704,8 +688,8 @@ class Parser {
 
 } // namespace
 
-std::expected<Program, SyntaxError> parse(lexer::Lexer& lexer, std::string_view entry_point) {
-    Parser parser{lexer, entry_point};
+std::expected<Program, SyntaxError> parse(lexer::Lexer& lexer) {
+    Parser parser{lexer};
     return parser.parse();
 }
 

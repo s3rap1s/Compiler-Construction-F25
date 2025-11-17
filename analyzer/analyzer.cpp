@@ -7,14 +7,16 @@
 #include "parser/types.hpp"
 #include "utils.hpp"
 
-#include <algorithm>
-#include <expected>
+#include <format>
+#include <iterator>
 #include <memory>
 #include <optional>
 #include <ranges>
 #include <string>
+#include <string_view>
 #include <type_traits>
 #include <unordered_map>
+#include <unordered_set>
 #include <utility>
 #include <variant>
 #include <vector>
@@ -23,145 +25,209 @@ namespace analyzer {
 
 using namespace parser;
 
-struct LocalScope {
-    std::unordered_map<std::string, std::pair<std::optional<Type>, bool>> variables;
-    std::unordered_map<std::string, std::pair<Type, bool>> types;
+struct VarInfo {
+    const Type* type;
+    bool used;
+};
+
+struct TypeInfo {
+    std::reference_wrapper<const Type> type;
+    bool used;
+};
+
+struct RoutineInfo {
+    std::reference_wrapper<const RoutineDeclaration> declaration;
+    bool defined;
+    bool used;
+};
+
+struct Scope {
+    const Block* parent;
+    std::unordered_map<std::string, VarInfo> variables;
+    std::unordered_map<std::string, TypeInfo> types;
+
+    explicit Scope(const Block* parent) : parent{parent} {}
 };
 
 struct SymbolTable {
-    std::unordered_map<std::string, std::pair<std::pair<RoutineDeclaration, bool>, bool>> routines;
+  private:
+    std::unordered_map<std::string, RoutineInfo> routines;
+    std::unordered_set<std::string> for_loop_variables;
 
-    std::vector<LocalScope> local_scopes;
-    std::vector<std::string> for_loop_variables;
-
-    std::unordered_map<const Block*, LocalScope> block_usage;
+    std::unordered_map<const Block*, Scope> scopes{{nullptr, Scope{nullptr}}}; // nullptr is the global scope
     const Block* current_block = nullptr;
 
-    void pushScope() {
-        local_scopes.emplace_back();
+    template <bool Const>
+    struct ScopeIterator {
+        MaybeConst<Const, std::unordered_map<const Block*, Scope>>* scopes;
+        const Block* current_block;
+
+        MaybeConst<Const, Scope>& operator*() const {
+            return scopes->find(current_block)->second;
+        }
+
+        ScopeIterator& operator++() {
+            const Block* parent = (**this).parent;
+            if (current_block == nullptr && parent == nullptr)
+                scopes = nullptr;
+            else
+                current_block = parent;
+            return *this;
+        }
+
+        bool operator==(std::default_sentinel_t /*unused*/) const {
+            return scopes == nullptr;
+        }
+    };
+
+    template <bool Const>
+    struct ScopesView {
+        MaybeConst<Const, SymbolTable>* table;
+
+        [[nodiscard]] ScopeIterator<Const> begin() const {
+            return ScopeIterator<Const>{.scopes = &table->scopes, .current_block = table->current_block};
+        }
+
+        [[nodiscard]] static std::default_sentinel_t end() {
+            return {};
+        }
+    };
+
+  public:
+    std::unordered_map<std::string, RoutineInfo>& getRoutines() {
+        return routines;
     }
 
-    void popScope() {
-        local_scopes.pop_back();
+    std::unordered_map<const Block*, Scope>& getScopes() {
+        return scopes;
+    }
+
+    std::unordered_set<std::string>& getForLoopVariables() {
+        return for_loop_variables;
+    }
+
+    ScopesView<false> getScopesView() {
+        return ScopesView<false>{this};
+    }
+
+    ScopesView<true> getScopesView() const {
+        return ScopesView<true>{this};
+    }
+
+    Scope& getGlobalScope() {
+        return scopes.find(nullptr)->second;
+    }
+
+    Scope& getCurrentScope() {
+        return scopes.find(current_block)->second;
+    }
+
+    void pushScope(const Block& block) {
+        if (current_block == &block)
+            return;
+        scopes.try_emplace(&block, current_block);
+        current_block = &block;
+    }
+
+    void popScope(const Block& block) {
+        if (current_block == &block)
+            current_block = scopes.find(current_block)->second.parent;
     }
 
     bool varExists(const ModifiablePrimary& mp) const {
-        for (const auto& local_scope : std::ranges::reverse_view(local_scopes)) {
-            if (local_scope.variables.contains(mp.variable)) {
+        for (const Scope& scope : getScopesView()) {
+            if (scope.variables.contains(mp.variable))
                 return true;
+        }
+        throw SemanticError{"Undeclared variable: " + mp.variable, mp.span};
+    }
+
+    bool typeExists(const std::string& type_name) const {
+        for (const Scope& scope : getScopesView()) {
+            if (scope.types.contains(type_name))
+                return true;
+        }
+        throw SemanticError{"Undeclared type: " + type_name, {}}; // TODO: add span to type
+    }
+
+    bool typeExists(const Type& type) const {
+        if (std::holds_alternative<std::string>(type))
+            return typeExists(std::get<std::string>(type));
+        return true;
+    }
+
+    void addLocalVariable(const VariableDeclaration& vd) {
+        Scope& last_scope = getCurrentScope();
+        if (last_scope.variables.contains(vd.identifier))
+            throw SemanticError{"Duplicate variable declaration: " + vd.identifier, vd.span};
+        last_scope.variables.emplace(vd.identifier, VarInfo{.type = vd.type ? &*vd.type : nullptr, .used = false});
+    }
+
+    void addLocalParameter(const ParameterDeclaration& pd) {
+        Scope& last_scope = getCurrentScope();
+        if (last_scope.variables.contains(pd.identifier))
+            throw SemanticError{"Duplicate variable declaration: " + pd.identifier, pd.span};
+        last_scope.variables.emplace(pd.identifier, VarInfo{.type = &pd.type, .used = false});
+    }
+
+    void addLocalType(const TypeDeclaration& td) {
+        Scope& last_scope = getCurrentScope();
+        if (last_scope.types.contains(td.identifier))
+            throw SemanticError{"Duplicate type declaration: " + td.identifier, td.span};
+        last_scope.types.emplace(td.identifier, TypeInfo{.type = td.type, .used = false});
+    }
+
+    const Type& getVariableType(const ModifiablePrimary& mp) const {
+        for (const Scope& scope : getScopesView()) {
+            if (auto it = scope.variables.find(mp.variable);
+                it != scope.variables.end() && it->second.type != nullptr) {
+                return *it->second.type;
             }
         }
         throw SemanticError{"Undeclared variable: " + mp.variable, mp.span};
     }
 
-    void addLocalVar(const VariableDeclaration& vd) {
-        if (local_scopes.back().variables.contains(vd.identifier)) {
-            throw SemanticError{"Duplicate variable declaration: " + vd.identifier, vd.span};
+    const Type& resolveType(const Type& type) const {
+        if (!std::holds_alternative<std::string>(type))
+            return type;
+
+        const auto& type_name = std::get<std::string>(type);
+        for (const Scope& local_scope : getScopesView()) {
+            if (auto it = local_scope.types.find(type_name); it != local_scope.types.end())
+                return it->second.type;
         }
-        local_scopes.back().variables[vd.identifier] = {vd.type, false};
+
+        throw SemanticError{"Undeclared type: " + type_name, {}};
     }
 
     void markVarUsed(const std::string& identifier) {
-        for (auto& local_scope : std::ranges::reverse_view(local_scopes)) {
-            if (local_scope.variables.contains(identifier)) {
-                local_scope.variables[identifier].second = true;
-                if (current_block) {
-                    block_usage[current_block].variables[identifier].second = true;
-                }
+        for (Scope& scope : getScopesView()) {
+            if (scope.variables.contains(identifier)) {
+                scope.variables.at(identifier).used = true;
                 return;
             }
         }
     }
 
-    bool typeExists(const Type& type) const {
-        if (std::holds_alternative<std::string>(type)) {
-            const auto& type_str = std::get<std::string>(type);
-            for (const auto& local_scope : std::ranges::reverse_view(local_scopes)) {
-                if (local_scope.types.contains(type_str)) {
-                    return true;
-                }
-            }
-            throw SemanticError{"Undeclared type: " + type_str, {}}; // TODO: add span to type
-        }
-        return true;
-    }
-
-    Type getVariableType(const ModifiablePrimary& mp) {
-        for (const auto& local_scope : std::ranges::reverse_view(local_scopes)) {
-            if (local_scope.variables.contains(mp.variable) && local_scope.variables.at(mp.variable).first) {
-                return *local_scope.variables.at(mp.variable).first;
-            }
-        }
-        throw SemanticError{"Undeclared variablee: " + mp.variable, mp.span};
-    }
-
-    Type resolveType(Type type) {
-        while (std::holds_alternative<std::string>(type)) {
-            const std::string& type_name = std::get<std::string>(type);
-            bool found = false;
-
-            for (const auto& local_scope : std::ranges::reverse_view(local_scopes)) {
-                if (local_scope.types.contains(type_name)) {
-                    type = local_scope.types.at(type_name).first;
-                    found = true;
-                    break;
-                }
-            }
-            if (!found) {
-                throw SemanticError{"Undeclared type: " + type_name, {}};
-            }
-        }
-        return type;
-    }
-
-    void addLocalType(const TypeDeclaration& td) {
-        if (local_scopes.back().types.contains(td.identifier)) {
-            throw SemanticError{"Duplicate type declaration: " + td.identifier, td.span};
-        }
-        local_scopes.back().types[td.identifier] = {td.type, false};
-    }
-
     void markTypeUsed(const std::string& identifier) {
-        for (auto& local_scope : std::ranges::reverse_view(local_scopes)) {
-            if (local_scope.types.contains(identifier)) {
-                local_scope.types[identifier].second = true;
-                if (current_block) {
-                    block_usage[current_block].types[identifier].second = true;
-                }
+        for (Scope& scope : getScopesView()) {
+            if (scope.types.contains(identifier)) {
+                scope.types.at(identifier).used = true;
                 return;
             }
         }
     }
 
     void markRoutineUsed(const std::string& identifier) {
-        if (routines.contains(identifier)) {
-            routines[identifier].second = true;
-        }
-    }
-
-    void setCurrentBlock(const Block* ptr) {
-        current_block = ptr;
-        if (ptr && !block_usage.contains(ptr)) {
-            block_usage[ptr] = {};
-        }
-    }
-
-    void saveBlockUsage(const Block& block) {
-        auto& current_scope = local_scopes.back();
-        auto& block_usage_cur = block_usage[&block];
-
-        for (const auto& [var, used] : current_scope.variables) {
-            block_usage_cur.variables[var] = used;
-        }
-        for (const auto& [type, used] : current_scope.types) {
-            block_usage_cur.types[type] = used;
-        }
+        if (auto it = routines.find(identifier); it != routines.end())
+            it->second.used = true;
     }
 };
 
 class SemanticAnalyzer {
   private:
     Program& program; // NOLINT(*ref*)
+    std::string_view entry_point;
     SymbolTable table;
 
     void checkExpression(const Expression& expr) {
@@ -204,12 +270,11 @@ class SemanticAnalyzer {
         std::visit(
             [this](const auto& prim) {
                 using T = std::decay_t<decltype(prim)>;
-
                 if constexpr (std::is_same_v<T, RoutineCall>) {
                     checkRoutineCall(prim);
                 } else if constexpr (std::is_same_v<T, ModifiablePrimary>) {
                     checkModifiablePrimary(prim);
-                } else if constexpr (std::is_same_v<T, std::shared_ptr<Expression>>) {
+                } else if constexpr (std::is_same_v<T, std::unique_ptr<Expression>>) {
                     checkExpression(*prim);
                 } else if constexpr (std::is_same_v<T, UnarySign>) {
                     checkPrimary(*prim.operand);
@@ -222,186 +287,165 @@ class SemanticAnalyzer {
         table.varExists(mp);
         table.markVarUsed(mp.variable);
         if (!mp.accessors.empty()) {
-            auto current_type = table.getVariableType(mp);
+            std::reference_wrapper<const Type> current_type = table.getVariableType(mp);
             for (const auto& accessor : mp.accessors) {
-                current_type = checkAccessor(mp, current_type, accessor);
+                current_type = checkAccessor(mp, current_type.get(), accessor);
             }
         }
     }
 
-    Type checkAccessor(const ModifiablePrimary& mp,
-                       Type current_type,
-                       const std::variant<Expression, std::string>& accessor) { // NOLINT(*complexity*)
-        current_type = table.resolveType(current_type);
-        if (std::holds_alternative<std::string>(accessor)) {
-            const auto& field_name = std::get<std::string>(accessor);
+    const Type& checkAccessor(const ModifiablePrimary& mp,
+                              const Type& type_of_last,
+                              const std::variant<Expression, std::string>& accessor) { // NOLINT(*complexity*)
+        return std::visit(
+            overloaded{
+                [&](const std::string& field_name) -> const Type& { return checkField(mp, type_of_last, field_name); },
+                [&](const Expression& index) -> const Type& { return checkIndex(mp, type_of_last, index); },
+            },
+            accessor);
+    }
 
-            if (std::holds_alternative<ArrayType>(current_type)) {
-                if (field_name == "size") {
-                    return IntegerType{};
-                }
-                throw SemanticError{"Variable " + mp.variable + " has no field named '" + field_name + "'", mp.span};
-            }
-            if (!std::holds_alternative<RecordType>(current_type)) {
-                throw SemanticError{"Cannot access field '" + field_name + "' on non-record type", mp.span};
-            }
+    const Type& checkField(const ModifiablePrimary& mp, const Type& type_of_last, const std::string& field_name) {
+        const Type& resolved_type = table.resolveType(type_of_last);
 
-            const auto& record = std::get<RecordType>(current_type);
-            bool field_found = false;
-
-            for (const auto& field : record.fields) {
-                if (field->identifier == field_name) {
-                    if (!field->type) {
-                        // TODO: deduce type of the field here
-                    } else {
-                        field_found = true;
-                        return *field->type;
-                    }
-                }
-            }
-
-            if (!field_found) {
-                throw SemanticError{mp.variable + " has no field '" + field_name + "'", mp.span};
-            }
-        } else {
-            if (!std::holds_alternative<ArrayType>(current_type)) {
-                throw SemanticError{"Cannot index non-array type", mp.span};
-            }
-
-            const auto& index_expr = std::get<Expression>(accessor);
-            checkExpression(index_expr);
-            current_type = table.resolveType(current_type);
-            const auto& array = std::get<ArrayType>(current_type);
-            return *array.element_type;
+        if (std::holds_alternative<ArrayType>(resolved_type)) {
+            if (field_name == "size")
+                return IntegerType{};
+            throw SemanticError{"Variable " + mp.variable + " has no field named '" + field_name + "'", mp.span};
         }
+        if (!std::holds_alternative<RecordType>(resolved_type))
+            throw SemanticError{"Cannot access field '" + field_name + "' on non-record type", mp.span};
 
-        throw SemanticError{"Invalid accessor", mp.span};
+        for (const VariableDeclaration& field : std::get<RecordType>(resolved_type).fields) {
+            if (field.identifier == field_name) {
+                if (!field.type) {
+                    // TODO: deduce type of the field here
+                } else {
+                    return *field.type;
+                }
+            }
+        }
+        throw SemanticError{mp.variable + " has no field '" + field_name + "'", mp.span};
+    }
+
+    const Type& checkIndex(const ModifiablePrimary& mp, const Type& type_of_last, const Expression& index) {
+        const Type& resolved_type = table.resolveType(type_of_last);
+
+        if (!std::holds_alternative<ArrayType>(resolved_type))
+            throw SemanticError{"Cannot index non-array type", mp.span};
+
+        checkExpression(index);
+        const auto& array = std::get<ArrayType>(resolved_type);
+        return *array.element_type;
     }
 
     void checkRoutineCall(const RoutineCall& call) {
-        auto routine_it = table.routines.find(call.name);
-        if (routine_it == table.routines.end()) {
+        auto routine_it = table.getRoutines().find(call.name);
+        if (routine_it == table.getRoutines().end()) {
             throw SemanticError{"Undeclared routine: " + call.name, call.span};
         }
+
         table.markRoutineUsed(call.name);
-        const RoutineDeclaration& routine_decl = routine_it->second.first.first;
+        const RoutineDeclaration& routine_decl = routine_it->second.declaration;
 
         if (call.arguments.size() != routine_decl.parameters.size()) {
-            throw SemanticError{"Routine " + call.name + " expects " + std::to_string(routine_decl.parameters.size()) +
-                                    " arguments, but " + std::to_string(call.arguments.size()) + " provided",
+            throw SemanticError{std::format("Routine {} expects {} arguments, but {} are provided",
+                                            call.name,
+                                            routine_decl.parameters.size(),
+                                            call.arguments.size()),
                                 call.span};
         }
 
-        for (const auto& arg : call.arguments) {
+        for (const Expression& arg : call.arguments) {
             checkExpression(arg);
         }
     }
 
     void checkType(const Type& type) {
-        std::visit(
-            [this](const auto& t) {
-                using T = std::decay_t<decltype(t)>;
-
-                if constexpr (std::is_same_v<T, std::string>) {
-                    table.typeExists(t);
-                    table.markTypeUsed(t);
-                } else if constexpr (std::is_same_v<T, ArrayType>) {
-                    checkType(*t.element_type);
-                    if (t.size) {
-                        checkExpression(*t.size);
-                    }
-                    if (std::holds_alternative<std::string>(*t.element_type)) {
-                        const auto& type_name = std::get<std::string>(*t.element_type);
-                        table.markTypeUsed(type_name);
-                    }
-                } else if constexpr (std::is_same_v<T, RecordType>) {
-                    for (const auto& field : t.fields) {
-                        if (field->type) {
-                            checkType(*field->type);
-                        }
-                        if (std::holds_alternative<std::string>(*field->type)) {
-                            const auto& type_name = std::get<std::string>(*field->type);
-                            table.markTypeUsed(type_name);
-                        }
-                    }
-                }
-            },
-            type);
+        std::visit(overloaded{[this](const std::string& type_name) {
+                                  table.typeExists(type_name);
+                                  table.markTypeUsed(type_name);
+                              },
+                              [this](const ArrayType& array) {
+                                  checkType(*array.element_type);
+                                  if (array.size)
+                                      checkExpression(*array.size);
+                                  if (std::holds_alternative<std::string>(*array.element_type)) {
+                                      const auto& type_name = std::get<std::string>(*array.element_type);
+                                      table.markTypeUsed(type_name);
+                                  }
+                              },
+                              [this](const RecordType& record) {
+                                  for (const VariableDeclaration& field : record.fields) {
+                                      if (field.type)
+                                          checkType(*field.type);
+                                      if (std::holds_alternative<std::string>(*field.type)) {
+                                          const auto& type_name = std::get<std::string>(*field.type);
+                                          table.markTypeUsed(type_name);
+                                      }
+                                  }
+                              },
+                              [](const auto&) {}},
+                   type);
     }
 
     void checkBlock(const Block& block) {
-        table.pushScope();
-        table.setCurrentBlock(&block);
+        table.pushScope(block);
         for (const auto& element : block) {
-            std::visit(
-                [this](const auto& elem) {
-                    using T = std::decay_t<decltype(elem)>;
-
-                    if constexpr (std::is_same_v<T, VariableDeclaration>) {
-                        table.addLocalVar(elem);
-
-                        if (elem.type) {
-                            checkType(*elem.type);
-                        }
-                        if (elem.value) {
-                            checkExpression(*elem.value);
-                        }
-                    } else if constexpr (std::is_same_v<T, TypeDeclaration>) {
-                        table.addLocalType(elem);
-                        checkType(elem.type);
-                    } else if constexpr (std::is_same_v<T, Statement>) {
-                        checkStatement(elem);
-                    }
-                },
-                element);
+            std::visit(overloaded{
+                           [&](const VariableDeclaration& var) {
+                               table.addLocalVariable(var);
+                               if (var.type)
+                                   checkType(*var.type);
+                               if (var.value)
+                                   checkExpression(*var.value);
+                           },
+                           [&](const TypeDeclaration& type) {
+                               table.addLocalType(type);
+                               checkType(type.type);
+                           },
+                           [&](const Statement& stmt) { checkStatement(stmt); },
+                       },
+                       element);
         }
-        table.saveBlockUsage(block);
-        table.popScope();
+        table.popScope(block);
     }
 
-    Block optimizeBlock(Block& block) { // NOLINT(*complexity*)
+    void optimizeBlock(Block& block) { // NOLINT(*complexity*)
+        auto block_usage_it = table.getScopes().find(&block);
+        if (block_usage_it == table.getScopes().end())
+            return;
+
+        const std::unordered_map<std::string, VarInfo>& variable_usage = block_usage_it->second.variables;
+        const std::unordered_map<std::string, TypeInfo>& type_usage = block_usage_it->second.types;
+
         Block optimized;
-        bool found_return = false;
-
-        auto block_usage_it = table.block_usage.find(&block);
-        if (block_usage_it == table.block_usage.end()) {
-            return block;
-        }
-
-        const auto& variable_usage = block_usage_it->second.variables;
-        const auto& type_usage = block_usage_it->second.types;
-
-        for (auto& element : block) {
-            if (found_return) {
+        for (bool found_return = false; auto& element : block) {
+            if (found_return)
                 break;
-            }
             std::visit(
-                [&](auto& elem) {
-                    using T = std::decay_t<decltype(elem)>;
-
-                    if constexpr (std::is_same_v<T, VariableDeclaration>) {
-                        if ((variable_usage.contains(elem.identifier) && variable_usage.at(elem.identifier).second) ||
-                            elem.value) {
+                overloaded{
+                    [&](VariableDeclaration& var) {
+                        if ((variable_usage.contains(var.identifier) && variable_usage.at(var.identifier).used) ||
+                            var.value) {
+                            optimized.emplace_back(std::move(var));
                         }
-                    } else if constexpr (std::is_same_v<T, Statement>) {
-                        auto optimized_statement = optimizeStatement(elem);
-                        if (optimized_statement) {
-                            optimized.push_back(*optimized_statement);
-
-                            if (std::holds_alternative<ReturnStatement>(*optimized_statement)) {
-                                found_return = true;
-                            }
+                    },
+                    [&](TypeDeclaration& type) {
+                        if (type_usage.contains(type.identifier) && type_usage.at(type.identifier).used) {
+                            optimized.emplace_back(std::move(type));
                         }
-                    } else if constexpr (std::is_same_v<T, TypeDeclaration>) {
-                        if (type_usage.contains(elem.identifier) && type_usage.at(elem.identifier).second) {
-                            optimized.push_back(elem);
-                        }
-                    }
+                    },
+                    [&](Statement& statement) {
+                        optimizeStatement(statement);
+                        if (std::holds_alternative<ReturnStatement>(statement))
+                            found_return = true;
+                        optimized.emplace_back(std::move(statement));
+                    },
                 },
                 element);
         }
-
-        return optimized;
+        block = std::move(optimized);
     }
 
     void checkStatement(const Statement& stmt) {
@@ -439,27 +483,17 @@ class SemanticAnalyzer {
             stmt);
     }
 
-    std::optional<Statement> optimizeStatement(Statement& stmt) {
-        return std::visit(
-            [&](auto& statement) -> std::optional<Statement> {
+    void optimizeStatement(Statement& stmt) {
+        std::visit(
+            [&](auto& statement) {
                 using T = std::decay_t<decltype(statement)>;
 
-                if constexpr (std::is_same_v<T, WhileStatement>) {
-                    auto optimized_body = optimizeBlock(statement.body);
-                    return WhileStatement{{statement.span}, statement.condition, optimized_body};
-                } else if constexpr (std::is_same_v<T, ForStatement>) {
-                    auto optimized_body = optimizeBlock(statement.body);
-                    return ForStatement{
-                        {statement.span}, statement.counter, statement.range, optimized_body, statement.is_reversed};
+                if constexpr (std::is_same_v<T, WhileStatement> || std::is_same_v<T, ForStatement>) {
+                    optimizeBlock(statement.body);
                 } else if constexpr (std::is_same_v<T, IfStatement>) {
-                    auto optimized_then = optimizeBlock(statement.true_branch);
-                    std::optional<Block> optimized_else;
-                    if (statement.false_branch) {
-                        optimized_else = optimizeBlock(*statement.false_branch);
-                    }
-                    return IfStatement{{statement.span}, statement.condition, optimized_then, optimized_else};
-                } else {
-                    return statement;
+                    optimizeBlock(statement.true_branch);
+                    if (statement.false_branch)
+                        optimizeBlock(*statement.false_branch);
                 }
             },
             stmt);
@@ -467,20 +501,17 @@ class SemanticAnalyzer {
 
     void checkAssignment(const AssignmentStatement& assignment) {
         checkModifiablePrimary(assignment.target);
-
-        if (std::ranges::find(table.for_loop_variables, assignment.target.variable) != table.for_loop_variables.end()) {
-            throw SemanticError{"Cannot assign to for loop variable: " + assignment.target.variable, assignment.span};
-        }
-
         checkExpression(assignment.expression);
+        if (table.getForLoopVariables().contains(assignment.target.variable))
+            throw SemanticError{"Cannot assign to for loop variable: " + assignment.target.variable, assignment.span};
     }
 
     void checkForStatement(const ForStatement& for_stmt) {
-        table.pushScope();
-        table.addLocalVar(VariableDeclaration{
+        table.pushScope(for_stmt.body);
+        table.addLocalVariable(VariableDeclaration{
             for_stmt.counter, IntegerType{{0, 0, 0, 0}}, std::nullopt}); // TODO: add span to for counter
         table.markVarUsed(for_stmt.counter);
-        table.for_loop_variables.push_back(for_stmt.counter);
+        table.getForLoopVariables().insert(for_stmt.counter);
 
         if (std::holds_alternative<Expression>(for_stmt.range)) {
             checkExpression(std::get<Expression>(for_stmt.range));
@@ -492,30 +523,32 @@ class SemanticAnalyzer {
 
         checkBlock(for_stmt.body);
 
-        table.for_loop_variables.pop_back();
-        table.popScope();
+        table.getForLoopVariables().erase(for_stmt.counter);
+        table.popScope(for_stmt.body);
     }
 
-    void checkRoutineDeclaration(const RoutineDeclaration& routine) {
+    void checkRoutineDeclaration(RoutineDeclaration& routine) {
+        for (const ParameterDeclaration& param : routine.parameters)
+            checkType(param.type);
+
         if (!routine.body)
             return;
 
-        table.pushScope();
-
-        for (const auto& param : routine.parameters) {
-            table.addLocalVar(VariableDeclaration{param.identifier, param.type, std::nullopt});
-            checkType(param.type);
+        if (auto* expr = std::get_if<Expression>(&*routine.body)) {
+            checkExpression(*expr);
+            Block block;
+            block.emplace_back(ReturnStatement{.value = std::move(*expr)});
+            *routine.body = std::move(block);
         }
-        if (routine.return_type) {
+        const Block& body = std::get<Block>(*routine.body);
+
+        table.pushScope(body);
+        for (const ParameterDeclaration& param : routine.parameters)
+            table.addLocalParameter(param);
+        if (routine.return_type)
             checkType(*routine.return_type);
-        }
-        if (std::holds_alternative<Expression>(*routine.body)) {
-            checkExpression(std::get<Expression>(*routine.body));
-        } else {
-            checkBlock(std::get<Block>(*routine.body));
-        }
-
-        table.popScope();
+        checkBlock(body);
+        table.popScope(body);
     }
 
     void optimizeRoutine(RoutineDeclaration& routine) {
@@ -523,42 +556,42 @@ class SemanticAnalyzer {
             return;
 
         if (std::holds_alternative<Block>(*routine.body)) {
-            auto& block = std::get<Block>(*routine.body);
-            auto optimized_block = optimizeBlock(block);
-            routine.body = optimized_block;
+            optimizeBlock(std::get<Block>(*routine.body));
         }
     }
 
     void checkForwardDeclarations() {
-        for (const auto& [identifier, routine_pair] : table.routines) {
-            if (!routine_pair.first.second) {
+        for (const auto& [identifier, routine_info] : table.getRoutines()) {
+            if (!routine_info.defined) {
                 throw SemanticError{"Forward declared routine \"" + identifier + "\" is never defined",
-                                    routine_pair.first.first.span};
+                                    routine_info.declaration.get().span};
             }
         }
     }
 
     void optimizeProgram() {
-        table.routines.at(program.entry_point.identifier).second = true;
+        if (auto it = table.getRoutines().find(std::string{entry_point}); it != table.getRoutines().end())
+            it->second.used = true;
+
         auto it = program.declarations.begin();
         while (it != program.declarations.end()) {
             if (std::holds_alternative<VariableDeclaration>(*it)) {
                 const auto& var_decl = std::get<VariableDeclaration>(*it);
-                if (!table.local_scopes.front().variables.at(var_decl.identifier).second) {
+                if (!table.getGlobalScope().variables.at(var_decl.identifier).used) {
                     it = program.declarations.erase(it);
                     continue;
                 }
             }
             if (std::holds_alternative<TypeDeclaration>(*it)) {
                 const auto& type_decl = std::get<TypeDeclaration>(*it);
-                if (!table.local_scopes.front().types.at(type_decl.identifier).second) {
+                if (!table.getGlobalScope().types.at(type_decl.identifier).used) {
                     it = program.declarations.erase(it);
                     continue;
                 }
             }
             if (std::holds_alternative<RoutineDeclaration>(*it)) {
                 auto& routine_decl = std::get<RoutineDeclaration>(*it);
-                if (!table.routines.at(routine_decl.identifier).second) {
+                if (!table.getRoutines().at(routine_decl.identifier).used) {
                     it = program.declarations.erase(it);
                     continue;
                 }
@@ -568,70 +601,59 @@ class SemanticAnalyzer {
         }
     }
 
-    std::optional<SemanticError> checkProgram() { // NOLINT(*complexity*)
-        try {
-            table.pushScope();
-
-            for (const auto& decl : program.declarations) {
-                std::visit(
-                    [this](const auto& d) {
-                        using T = std::decay_t<decltype(d)>;
-
-                        if constexpr (std::is_same_v<T, VariableDeclaration>) {
-                            table.addLocalVar(d);
-                            if (d.type) {
-                                checkType(*d.type);
-                            }
-                            if (d.value) {
-                                checkExpression(*d.value);
-                            }
-                        } else if constexpr (std::is_same_v<T, TypeDeclaration>) {
-                            table.addLocalType(d);
-                            checkType(d.type);
-                        } else if constexpr (std::is_same_v<T, RoutineDeclaration>) {
-                            auto it = table.routines.find(d.identifier);
-                            if (it != table.routines.end()) {
-                                if (it->second.first.second && d.body) {
-                                    throw SemanticError{"Duplicate routine declaration: " + d.identifier, d.span};
-                                }
-                                if (d.body) {
-                                    it->second.first.second = true;
-                                }
-                            } else {
-                                bool is_defined = static_cast<bool>(d.body);
-                                table.routines[d.identifier] = {{d, is_defined}, false};
-                            }
-                            checkRoutineDeclaration(d);
-                        }
-                    },
-                    decl);
-            }
-
-            checkForwardDeclarations();
-
-        } catch (const SemanticError& error) {
-            return error;
+    void checkProgram() {
+        for (auto& decl : program.declarations) {
+            std::visit(overloaded{
+                           [this](const VariableDeclaration& var) {
+                               table.addLocalVariable(var);
+                               if (var.type)
+                                   checkType(*var.type);
+                               if (var.value)
+                                   checkExpression(*var.value);
+                           },
+                           [this](const TypeDeclaration& type) {
+                               table.addLocalType(type);
+                               checkType(type.type);
+                           },
+                           [this](RoutineDeclaration& routine) {
+                               auto it = table.getRoutines().find(routine.identifier);
+                               if (it != table.getRoutines().end()) {
+                                   if (it->second.defined && routine.body)
+                                       throw SemanticError{"Duplicate routine declaration: " + routine.identifier,
+                                                           routine.span};
+                                   if (routine.body)
+                                       it->second.defined = true;
+                               } else {
+                                   bool is_defined = routine.body.has_value();
+                                   table.getRoutines().emplace(
+                                       routine.identifier,
+                                       RoutineInfo{.declaration = routine, .defined = is_defined, .used = false});
+                               }
+                               checkRoutineDeclaration(routine);
+                           },
+                       },
+                       decl);
         }
-        return std::nullopt;
+        checkForwardDeclarations();
     }
 
   public:
-    explicit SemanticAnalyzer(Program& program) : program{program} {
-        table = SymbolTable{};
-    }
+    explicit SemanticAnalyzer(Program& program, std::string_view entry_point)
+        : program{program}, entry_point{entry_point}, table{} {}
 
-    std::expected<Program, SemanticError> analyze() {
-        auto error = checkProgram();
-        if (error) {
-            return std::unexpected{*error};
+    std::optional<SemanticError> analyze() {
+        try {
+            checkProgram();
+        } catch (const SemanticError& error) {
+            return error;
         }
-        optimizeProgram();
-        return program;
+        optimizeProgram(); // should never throw SemanticError
+        return std::nullopt;
     }
 };
 
-std::expected<Program, SemanticError> analyze(Program& ast) {
-    SemanticAnalyzer analyzer{ast};
+std::optional<SemanticError> analyze(Program& ast, std::string_view entry_point) {
+    SemanticAnalyzer analyzer{ast, entry_point};
     return analyzer.analyze();
 }
 

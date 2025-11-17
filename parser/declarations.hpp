@@ -12,7 +12,7 @@
 
 namespace parser {
 
-struct VariableDeclaration : AstNode { //NOLINT(*init*)
+struct VariableDeclaration : AstNode { // NOLINT(*init*)
     std::string identifier;
     std::optional<Type> type;
     std::optional<Expression> value;
@@ -20,19 +20,20 @@ struct VariableDeclaration : AstNode { //NOLINT(*init*)
 
     VariableDeclaration() = default;
 
-    template<typename T, typename E>
-    VariableDeclaration(std::string identifier, T&& type, E&& value) : // NOLINT(*init*)
-        identifier(std::move(identifier)), type(std::forward<T>(type)), value(std::forward<E>(value)) {}
+    VariableDeclaration(std::string identifier, // NOLINT(*init*)
+                        std::optional<Type> type,
+                        std::optional<Expression> value)
+        : identifier{std::move(identifier)}, type{std::move(type)}, value{std::move(value)} {}
 };
 
-struct ParameterDecalration : AstNode {
+struct ParameterDeclaration : AstNode {
     std::string identifier;
     Type type;
 };
 
 struct RoutineDeclaration : AstNode {
     std::string identifier;
-    std::vector<ParameterDecalration> parameters;
+    std::vector<ParameterDeclaration> parameters;
     std::optional<std::variant<Block, Expression>> body;
     std::optional<Type> return_type;
 };
@@ -43,7 +44,6 @@ struct TypeDeclaration : AstNode {
 };
 
 struct Program {
-    RoutineDeclaration entry_point;
     std::vector<std::variant<VariableDeclaration, TypeDeclaration, RoutineDeclaration>> declarations;
 };
 

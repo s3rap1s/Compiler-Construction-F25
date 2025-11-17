@@ -85,7 +85,9 @@ class TreePrinter {
         }
 
         if (decl.body) {
-            out << ", Body: ";
+            newline();
+            print_indent();
+            out << "Body: ";
             newline();
             indent_level++;
             std::visit([this](const auto& b) { this->printDeduced(b); }, *decl.body);
@@ -116,18 +118,15 @@ class TreePrinter {
         out << "Record";
         indent_level++;
         if (!record.fields.empty()) {
-            out << " {";
             newline();
-            for (size_t i = 0; i < record.fields.size(); ++i) {
-                const auto& field = record.fields[i];
-                printDeduced(*field);
+            for (std::size_t i = 0; i < record.fields.size(); ++i) {
+                const parser::VariableDeclaration& field = record.fields[i];
+                printDeduced(field);
                 if (i < record.fields.size() - 1) {
                     out << ", ";
+                    newline();
                 }
-                newline();
             }
-            print_indent();
-            out << "}";
         }
         newline();
         indent_level--;
@@ -148,6 +147,7 @@ class TreePrinter {
         }
         out << " of ";
         printDeduced(*array.element_type);
+        newline();
     }
 
     void print(const std::string& type_name) {
@@ -380,7 +380,7 @@ class TreePrinter {
         printDeduced(*unary.operand);
     }
 
-    void print(const std::shared_ptr<parser::Expression>& expr_ptr) {
+    void print(const std::unique_ptr<parser::Expression>& expr_ptr) {
         print_indent();
         out << "(";
         newline();
@@ -537,6 +537,8 @@ class TreePrinter {
     void print(const parser::StringLiteral& str_lit) {
         out << "StringLiteral(\"" << str_lit.value << "\")";
     }
+
+    void print(const parser::NoopStatement& /*unused*/) {}
 
   private:
     template <typename Arg>
