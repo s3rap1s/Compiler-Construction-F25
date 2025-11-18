@@ -1,6 +1,7 @@
 #include "analyzer.hpp"
 
 #include "analyzer/semantic_error.hpp"
+#include "analyzer/symbol_table.hpp"
 #include "parser/declarations.hpp"
 #include "parser/expressions.hpp"
 #include "parser/statements.hpp"
@@ -8,7 +9,6 @@
 #include "utils.hpp"
 
 #include <format>
-#include <iterator>
 #include <memory>
 #include <optional>
 #include <ranges>
@@ -24,205 +24,6 @@
 namespace analyzer {
 
 using namespace parser;
-
-struct VarInfo {
-    const Type* type;
-    bool used;
-};
-
-struct TypeInfo {
-    std::reference_wrapper<const Type> type;
-    bool used;
-};
-
-struct RoutineInfo {
-    std::reference_wrapper<const RoutineDeclaration> declaration;
-    bool defined;
-    bool used;
-};
-
-struct Scope {
-    const Block* parent;
-    std::unordered_map<std::string, VarInfo> variables;
-    std::unordered_map<std::string, TypeInfo> types;
-
-    explicit Scope(const Block* parent) : parent{parent} {}
-};
-
-struct SymbolTable {
-  private:
-    std::unordered_map<std::string, RoutineInfo> routines;
-    std::unordered_set<std::string> for_loop_variables;
-
-    std::unordered_map<const Block*, Scope> scopes{{nullptr, Scope{nullptr}}}; // nullptr is the global scope
-    const Block* current_block = nullptr;
-
-    template <bool Const>
-    struct ScopeIterator {
-        MaybeConst<Const, std::unordered_map<const Block*, Scope>>* scopes;
-        const Block* current_block;
-
-        MaybeConst<Const, Scope>& operator*() const {
-            return scopes->find(current_block)->second;
-        }
-
-        ScopeIterator& operator++() {
-            const Block* parent = (**this).parent;
-            if (current_block == nullptr && parent == nullptr)
-                scopes = nullptr;
-            else
-                current_block = parent;
-            return *this;
-        }
-
-        bool operator==(std::default_sentinel_t /*unused*/) const {
-            return scopes == nullptr;
-        }
-    };
-
-    template <bool Const>
-    struct ScopesView {
-        MaybeConst<Const, SymbolTable>* table;
-
-        [[nodiscard]] ScopeIterator<Const> begin() const {
-            return ScopeIterator<Const>{.scopes = &table->scopes, .current_block = table->current_block};
-        }
-
-        [[nodiscard]] static std::default_sentinel_t end() {
-            return {};
-        }
-    };
-
-  public:
-    std::unordered_map<std::string, RoutineInfo>& getRoutines() {
-        return routines;
-    }
-
-    std::unordered_map<const Block*, Scope>& getScopes() {
-        return scopes;
-    }
-
-    std::unordered_set<std::string>& getForLoopVariables() {
-        return for_loop_variables;
-    }
-
-    ScopesView<false> getScopesView() {
-        return ScopesView<false>{this};
-    }
-
-    ScopesView<true> getScopesView() const {
-        return ScopesView<true>{this};
-    }
-
-    Scope& getGlobalScope() {
-        return scopes.find(nullptr)->second;
-    }
-
-    Scope& getCurrentScope() {
-        return scopes.find(current_block)->second;
-    }
-
-    void pushScope(const Block& block) {
-        if (current_block == &block)
-            return;
-        scopes.try_emplace(&block, current_block);
-        current_block = &block;
-    }
-
-    void popScope(const Block& block) {
-        if (current_block == &block)
-            current_block = scopes.find(current_block)->second.parent;
-    }
-
-    bool varExists(const ModifiablePrimary& mp) const {
-        for (const Scope& scope : getScopesView()) {
-            if (scope.variables.contains(mp.variable))
-                return true;
-        }
-        throw SemanticError{"Undeclared variable: " + mp.variable, mp.span};
-    }
-
-    bool typeExists(const std::string& type_name) const {
-        for (const Scope& scope : getScopesView()) {
-            if (scope.types.contains(type_name))
-                return true;
-        }
-        throw SemanticError{"Undeclared type: " + type_name, {}}; // TODO: add span to type
-    }
-
-    bool typeExists(const Type& type) const {
-        if (std::holds_alternative<std::string>(type))
-            return typeExists(std::get<std::string>(type));
-        return true;
-    }
-
-    void addLocalVariable(const VariableDeclaration& vd) {
-        Scope& last_scope = getCurrentScope();
-        if (last_scope.variables.contains(vd.identifier))
-            throw SemanticError{"Duplicate variable declaration: " + vd.identifier, vd.span};
-        last_scope.variables.emplace(vd.identifier, VarInfo{.type = vd.type ? &*vd.type : nullptr, .used = false});
-    }
-
-    void addLocalParameter(const ParameterDeclaration& pd) {
-        Scope& last_scope = getCurrentScope();
-        if (last_scope.variables.contains(pd.identifier))
-            throw SemanticError{"Duplicate variable declaration: " + pd.identifier, pd.span};
-        last_scope.variables.emplace(pd.identifier, VarInfo{.type = &pd.type, .used = false});
-    }
-
-    void addLocalType(const TypeDeclaration& td) {
-        Scope& last_scope = getCurrentScope();
-        if (last_scope.types.contains(td.identifier))
-            throw SemanticError{"Duplicate type declaration: " + td.identifier, td.span};
-        last_scope.types.emplace(td.identifier, TypeInfo{.type = td.type, .used = false});
-    }
-
-    const Type& getVariableType(const ModifiablePrimary& mp) const {
-        for (const Scope& scope : getScopesView()) {
-            if (auto it = scope.variables.find(mp.variable);
-                it != scope.variables.end() && it->second.type != nullptr) {
-                return *it->second.type;
-            }
-        }
-        throw SemanticError{"Undeclared variable: " + mp.variable, mp.span};
-    }
-
-    const Type& resolveType(const Type& type) const {
-        if (!std::holds_alternative<std::string>(type))
-            return type;
-
-        const auto& type_name = std::get<std::string>(type);
-        for (const Scope& local_scope : getScopesView()) {
-            if (auto it = local_scope.types.find(type_name); it != local_scope.types.end())
-                return it->second.type;
-        }
-
-        throw SemanticError{"Undeclared type: " + type_name, {}};
-    }
-
-    void markVarUsed(const std::string& identifier) {
-        for (Scope& scope : getScopesView()) {
-            if (scope.variables.contains(identifier)) {
-                scope.variables.at(identifier).used = true;
-                return;
-            }
-        }
-    }
-
-    void markTypeUsed(const std::string& identifier) {
-        for (Scope& scope : getScopesView()) {
-            if (scope.types.contains(identifier)) {
-                scope.types.at(identifier).used = true;
-                return;
-            }
-        }
-    }
-
-    void markRoutineUsed(const std::string& identifier) {
-        if (auto it = routines.find(identifier); it != routines.end())
-            it->second.used = true;
-    }
-};
 
 class SemanticAnalyzer {
   private:
@@ -658,4 +459,3 @@ std::optional<SemanticError> analyze(Program& ast, std::string_view entry_point)
 }
 
 } // namespace analyzer
-
