@@ -26,6 +26,7 @@ add_executable(main
     parser/parser.cpp
     parser/syntax_error.cpp
     parser/tree_printer.cpp
+    parser/ast.cpp
 
     analyzer/analyzer.cpp
     analyzer/symbol_table.cpp
