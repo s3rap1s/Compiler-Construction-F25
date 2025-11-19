@@ -1,9 +1,6 @@
 #include "tree_printer.hpp"
 
-#include "parser/declarations.hpp"
-#include "parser/expressions.hpp"
-#include "parser/statements.hpp"
-#include "parser/types.hpp"
+#include "parser/ast.hpp"
 
 #include <cstddef>
 #include <iostream>
@@ -43,7 +40,7 @@ class TreePrinter {
     // Declarations
     void print(const parser::VariableDeclaration& decl) {
         print_indent();
-        out << "VariableDeclaration: " << decl.identifier;
+        out << "VariableDeclaration: " << decl.name.text;
         if (decl.type) {
             out << " : ";
             printDeduced(*decl.type);
@@ -59,21 +56,21 @@ class TreePrinter {
 
     void print(const parser::TypeDeclaration& decl) {
         print_indent();
-        out << "TypeDeclaration: " << decl.identifier << " = ";
+        out << "TypeDeclaration: " << decl.name.text << " = ";
         printDeduced(decl.type);
         newline();
     }
 
     void print(const parser::RoutineDeclaration& decl) {
         print_indent();
-        out << "RoutineDeclaration: " << decl.identifier;
+        out << "RoutineDeclaration: " << decl.name.text;
 
         if (!decl.parameters.empty()) {
             out << "(";
             for (size_t i = 0; i < decl.parameters.size(); ++i) {
                 if (i > 0)
                     out << ", ";
-                out << decl.parameters[i].identifier << ": ";
+                out << decl.parameters[i].name.text << ": ";
                 printDeduced(decl.parameters[i].type);
             }
             out << ")";
@@ -150,8 +147,8 @@ class TreePrinter {
         newline();
     }
 
-    void print(const std::string& type_name) {
-        out << type_name;
+    void print(const parser::Identifier& id) {
+        out << id.text;
     }
 
     // Expressions
@@ -320,7 +317,7 @@ class TreePrinter {
 
     void print(const parser::RoutineCall& call) {
         print_indent();
-        out << "RoutineCall: " << call.name << "(";
+        out << "RoutineCall: " << call.routine_name.text << "(";
         for (size_t i = 0; i < call.arguments.size(); ++i) {
             if (i > 0)
                 out << ", ";
@@ -335,14 +332,14 @@ class TreePrinter {
     void print(const parser::ModifiablePrimary& mp) {
         if (mp.accessors.empty()) {
             print_indent();
-            out << "Identifier: " << mp.variable << '\n';
+            out << "Identifier: " << mp.variable.text << '\n';
             return;
         }
         print_indent();
         out << "ModifiablePrimary:\n";
         indent_level++;
         print_indent();
-        out << "Identifier: " << mp.variable << '\n';
+        out << "Identifier: " << mp.variable.text << '\n';
         for (const auto& accessor : mp.accessors) {
             std::visit(
                 [this](const auto& acc) {
@@ -380,11 +377,11 @@ class TreePrinter {
         printDeduced(*unary.operand);
     }
 
-    void print(const std::unique_ptr<parser::Expression>& expr_ptr) {
+    void print(const parser::ParenthesizedExpression& expr) {
         print_indent();
         out << "(";
         newline();
-        printDeduced(*expr_ptr);
+        printDeduced(*expr.expression);
         newline();
         print_indent();
         out << ")";
@@ -466,7 +463,7 @@ class TreePrinter {
 
     void print(const parser::ForStatement& for_stmt) {
         print_indent();
-        out << "For: " << for_stmt.counter << " in ";
+        out << "For: " << for_stmt.variable_name.text << " in ";
         if (for_stmt.is_reversed) {
             out << "REVERSED ";
         }
@@ -538,7 +535,10 @@ class TreePrinter {
         out << "StringLiteral(\"" << str_lit.value << "\")";
     }
 
-    void print(const parser::NoopStatement& /*unused*/) {}
+    void print(const parser::NoopStatement& /*unused*/) {
+        print_indent();
+        out << "Noop";
+    }
 
   private:
     template <typename Arg>

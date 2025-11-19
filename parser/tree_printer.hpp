@@ -1,6 +1,6 @@
 #pragma once
 
-#include "parser/declarations.hpp"
+#include "parser/ast.hpp"
 
 #include <iostream>
 

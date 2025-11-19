@@ -18,7 +18,7 @@
 #include "lexer/lexing_error.hpp"
 #include "lexer/token_printer.hpp"
 #include "lexer/tokens.hpp"
-#include "parser/declarations.hpp"
+#include "parser/ast.hpp"
 #include "parser/parser.hpp"
 #include "parser/syntax_error.hpp"
 #include "parser/tree_printer.hpp"

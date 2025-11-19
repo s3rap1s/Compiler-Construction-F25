@@ -1,7 +1,7 @@
 #pragma once
 
 #include "analyzer/semantic_error.hpp"
-#include "parser/declarations.hpp"
+#include "parser/ast.hpp"
 
 #include <optional>
 #include <string_view>

@@ -1,10 +1,7 @@
 #include "analyzer.hpp"
 
 #include "analyzer/semantic_error.hpp"
-#include "parser/declarations.hpp"
-#include "parser/expressions.hpp"
-#include "parser/statements.hpp"
-#include "parser/types.hpp"
+#include "parser/ast.hpp"
 #include "utils.hpp"
 
 #include <format>
@@ -136,10 +133,10 @@ struct SymbolTable {
 
     bool varExists(const ModifiablePrimary& mp) const {
         for (const Scope& scope : getScopesView()) {
-            if (scope.variables.contains(mp.variable))
+            if (scope.variables.contains(mp.variable.text))
                 return true;
         }
-        throw SemanticError{"Undeclared variable: " + mp.variable, mp.span};
+        throw SemanticError{"Undeclared variable: " + mp.variable.text, mp.variable.span};
     }
 
     bool typeExists(const std::string& type_name) const {
@@ -151,53 +148,46 @@ struct SymbolTable {
     }
 
     bool typeExists(const Type& type) const {
-        if (std::holds_alternative<std::string>(type))
-            return typeExists(std::get<std::string>(type));
+        if (std::holds_alternative<Identifier>(type))
+            return typeExists(std::get<Identifier>(type));
         return true;
     }
 
-    void addLocalVariable(const VariableDeclaration& vd) {
+    void addLocalVariable(const Identifier& id, const Type* type) {
         Scope& last_scope = getCurrentScope();
-        if (last_scope.variables.contains(vd.identifier))
-            throw SemanticError{"Duplicate variable declaration: " + vd.identifier, vd.span};
-        last_scope.variables.emplace(vd.identifier, VarInfo{.type = vd.type ? &*vd.type : nullptr, .used = false});
-    }
-
-    void addLocalParameter(const ParameterDeclaration& pd) {
-        Scope& last_scope = getCurrentScope();
-        if (last_scope.variables.contains(pd.identifier))
-            throw SemanticError{"Duplicate variable declaration: " + pd.identifier, pd.span};
-        last_scope.variables.emplace(pd.identifier, VarInfo{.type = &pd.type, .used = false});
+        if (last_scope.variables.contains(id.text))
+            throw SemanticError{"Duplicate variable declaration: " + id.text, id.span};
+        last_scope.variables.emplace(id.text, VarInfo{.type = type, .used = false});
     }
 
     void addLocalType(const TypeDeclaration& td) {
         Scope& last_scope = getCurrentScope();
-        if (last_scope.types.contains(td.identifier))
-            throw SemanticError{"Duplicate type declaration: " + td.identifier, td.span};
-        last_scope.types.emplace(td.identifier, TypeInfo{.type = td.type, .used = false});
+        if (last_scope.types.contains(td.name.text))
+            throw SemanticError{"Duplicate type declaration: " + td.name.text, td.name.span};
+        last_scope.types.emplace(td.name.text, TypeInfo{.type = td.type, .used = false});
     }
 
     const Type& getVariableType(const ModifiablePrimary& mp) const {
         for (const Scope& scope : getScopesView()) {
-            if (auto it = scope.variables.find(mp.variable);
+            if (auto it = scope.variables.find(mp.variable.text);
                 it != scope.variables.end() && it->second.type != nullptr) {
                 return *it->second.type;
             }
         }
-        throw SemanticError{"Undeclared variable: " + mp.variable, mp.span};
+        throw SemanticError{"Undeclared variable: " + mp.variable.text, mp.variable.span};
     }
 
     const Type& resolveType(const Type& type) const {
-        if (!std::holds_alternative<std::string>(type))
+        if (!std::holds_alternative<Identifier>(type))
             return type;
 
-        const auto& type_name = std::get<std::string>(type);
+        const auto& type_name = std::get<Identifier>(type);
         for (const Scope& local_scope : getScopesView()) {
-            if (auto it = local_scope.types.find(type_name); it != local_scope.types.end())
+            if (auto it = local_scope.types.find(type_name.text); it != local_scope.types.end())
                 return it->second.type;
         }
 
-        throw SemanticError{"Undeclared type: " + type_name, {}};
+        throw SemanticError{"Undeclared type: " + type_name.text, type_name.span};
     }
 
     void markVarUsed(const std::string& identifier) {
@@ -285,7 +275,7 @@ class SemanticAnalyzer {
 
     void checkModifiablePrimary(const ModifiablePrimary& mp) {
         table.varExists(mp);
-        table.markVarUsed(mp.variable);
+        table.markVarUsed(mp.variable.text);
         if (!mp.accessors.empty()) {
             std::reference_wrapper<const Type> current_type = table.getVariableType(mp);
             for (const auto& accessor : mp.accessors) {
@@ -296,28 +286,30 @@ class SemanticAnalyzer {
 
     const Type& checkAccessor(const ModifiablePrimary& mp,
                               const Type& type_of_last,
-                              const std::variant<Expression, std::string>& accessor) { // NOLINT(*complexity*)
+                              const std::variant<Expression, Identifier>& accessor) { // NOLINT(*complexity*)
         return std::visit(
             overloaded{
-                [&](const std::string& field_name) -> const Type& { return checkField(mp, type_of_last, field_name); },
+                [&](const Identifier& field_name) -> const Type& { return checkField(mp, type_of_last, field_name); },
                 [&](const Expression& index) -> const Type& { return checkIndex(mp, type_of_last, index); },
             },
             accessor);
     }
 
-    const Type& checkField(const ModifiablePrimary& mp, const Type& type_of_last, const std::string& field_name) {
+    // TODO: remove ModifiablePrimary parameter and find the name of last type
+    const Type& checkField(const ModifiablePrimary& mp, const Type& type_of_last, const Identifier& field_name) {
         const Type& resolved_type = table.resolveType(type_of_last);
 
         if (std::holds_alternative<ArrayType>(resolved_type)) {
-            if (field_name == "size")
+            if (field_name.text == "size")
                 return IntegerType{};
-            throw SemanticError{"Variable " + mp.variable + " has no field named '" + field_name + "'", mp.span};
+            throw SemanticError{"Variable " + mp.variable.text + " has no field named '" + field_name.text + "'",
+                                field_name.span};
         }
         if (!std::holds_alternative<RecordType>(resolved_type))
-            throw SemanticError{"Cannot access field '" + field_name + "' on non-record type", mp.span};
+            throw SemanticError{"Cannot access field '" + field_name.text + "' on non-record type", field_name.span};
 
         for (const VariableDeclaration& field : std::get<RecordType>(resolved_type).fields) {
-            if (field.identifier == field_name) {
+            if (field.name.text == field_name.text) {
                 if (!field.type) {
                     // TODO: deduce type of the field here
                 } else {
@@ -325,14 +317,14 @@ class SemanticAnalyzer {
                 }
             }
         }
-        throw SemanticError{mp.variable + " has no field '" + field_name + "'", mp.span};
+        throw SemanticError{mp.variable.text + " has no field '" + field_name.text + "'", field_name.span};
     }
 
     const Type& checkIndex(const ModifiablePrimary& mp, const Type& type_of_last, const Expression& index) {
         const Type& resolved_type = table.resolveType(type_of_last);
 
         if (!std::holds_alternative<ArrayType>(resolved_type))
-            throw SemanticError{"Cannot index non-array type", mp.span};
+            throw SemanticError{"Cannot index non-array type", mp.variable.span};
 
         checkExpression(index);
         const auto& array = std::get<ArrayType>(resolved_type);
@@ -340,20 +332,20 @@ class SemanticAnalyzer {
     }
 
     void checkRoutineCall(const RoutineCall& call) {
-        auto routine_it = table.getRoutines().find(call.name);
+        auto routine_it = table.getRoutines().find(call.routine_name.text);
         if (routine_it == table.getRoutines().end()) {
-            throw SemanticError{"Undeclared routine: " + call.name, call.span};
+            throw SemanticError{"Undeclared routine: " + call.routine_name.text, call.routine_name.span};
         }
 
-        table.markRoutineUsed(call.name);
+        table.markRoutineUsed(call.routine_name.text);
         const RoutineDeclaration& routine_decl = routine_it->second.declaration;
 
         if (call.arguments.size() != routine_decl.parameters.size()) {
             throw SemanticError{std::format("Routine {} expects {} arguments, but {} are provided",
-                                            call.name,
+                                            call.routine_name.text,
                                             routine_decl.parameters.size(),
                                             call.arguments.size()),
-                                call.span};
+                                call.routine_name.span};
         }
 
         for (const Expression& arg : call.arguments) {
@@ -370,18 +362,18 @@ class SemanticAnalyzer {
                                   checkType(*array.element_type);
                                   if (array.size)
                                       checkExpression(*array.size);
-                                  if (std::holds_alternative<std::string>(*array.element_type)) {
-                                      const auto& type_name = std::get<std::string>(*array.element_type);
-                                      table.markTypeUsed(type_name);
+                                  if (std::holds_alternative<Identifier>(*array.element_type)) {
+                                      const auto& type_name = std::get<Identifier>(*array.element_type);
+                                      table.markTypeUsed(type_name.text);
                                   }
                               },
                               [this](const RecordType& record) {
                                   for (const VariableDeclaration& field : record.fields) {
                                       if (field.type)
                                           checkType(*field.type);
-                                      if (std::holds_alternative<std::string>(*field.type)) {
-                                          const auto& type_name = std::get<std::string>(*field.type);
-                                          table.markTypeUsed(type_name);
+                                      if (std::holds_alternative<Identifier>(*field.type)) {
+                                          const auto& type_name = std::get<Identifier>(*field.type);
+                                          table.markTypeUsed(type_name.text);
                                       }
                                   }
                               },
@@ -394,7 +386,7 @@ class SemanticAnalyzer {
         for (const auto& element : block) {
             std::visit(overloaded{
                            [&](const VariableDeclaration& var) {
-                               table.addLocalVariable(var);
+                               table.addLocalVariable(var.name, var.type ? &*var.type : nullptr);
                                if (var.type)
                                    checkType(*var.type);
                                if (var.value)
@@ -423,27 +415,26 @@ class SemanticAnalyzer {
         for (bool found_return = false; auto& element : block) {
             if (found_return)
                 break;
-            std::visit(
-                overloaded{
-                    [&](VariableDeclaration& var) {
-                        if ((variable_usage.contains(var.identifier) && variable_usage.at(var.identifier).used) ||
-                            var.value) {
-                            optimized.emplace_back(std::move(var));
-                        }
-                    },
-                    [&](TypeDeclaration& type) {
-                        if (type_usage.contains(type.identifier) && type_usage.at(type.identifier).used) {
-                            optimized.emplace_back(std::move(type));
-                        }
-                    },
-                    [&](Statement& statement) {
-                        optimizeStatement(statement);
-                        if (std::holds_alternative<ReturnStatement>(statement))
-                            found_return = true;
-                        optimized.emplace_back(std::move(statement));
-                    },
-                },
-                element);
+            std::visit(overloaded{
+                           [&](VariableDeclaration& var) {
+                               if ((variable_usage.contains(var.name.text) && variable_usage.at(var.name.text).used) ||
+                                   var.value) {
+                                   optimized.emplace_back(std::move(var));
+                               }
+                           },
+                           [&](TypeDeclaration& type) {
+                               if (type_usage.contains(type.name.text) && type_usage.at(type.name.text).used) {
+                                   optimized.emplace_back(std::move(type));
+                               }
+                           },
+                           [&](Statement& statement) {
+                               optimizeStatement(statement);
+                               if (std::holds_alternative<ReturnStatement>(statement))
+                                   found_return = true;
+                               optimized.emplace_back(std::move(statement));
+                           },
+                       },
+                       element);
         }
         block = std::move(optimized);
     }
@@ -502,16 +493,17 @@ class SemanticAnalyzer {
     void checkAssignment(const AssignmentStatement& assignment) {
         checkModifiablePrimary(assignment.target);
         checkExpression(assignment.expression);
-        if (table.getForLoopVariables().contains(assignment.target.variable))
-            throw SemanticError{"Cannot assign to for loop variable: " + assignment.target.variable, assignment.span};
+        const Identifier& target_var = assignment.target.variable;
+        if (assignment.target.accessors.empty() && table.getForLoopVariables().contains(target_var.text))
+            throw SemanticError{"Cannot assign to for loop variable: " + target_var.text, target_var.span};
     }
 
     void checkForStatement(const ForStatement& for_stmt) {
         table.pushScope(for_stmt.body);
-        table.addLocalVariable(VariableDeclaration{
-            for_stmt.counter, IntegerType{{0, 0, 0, 0}}, std::nullopt}); // TODO: add span to for counter
-        table.markVarUsed(for_stmt.counter);
-        table.getForLoopVariables().insert(for_stmt.counter);
+        const Type& variable_type = IntegerType{};
+        table.addLocalVariable(for_stmt.variable_name, &variable_type);
+        table.markVarUsed(for_stmt.variable_name.text);
+        table.getForLoopVariables().insert(for_stmt.variable_name.text);
 
         if (std::holds_alternative<Expression>(for_stmt.range)) {
             checkExpression(std::get<Expression>(for_stmt.range));
@@ -523,7 +515,7 @@ class SemanticAnalyzer {
 
         checkBlock(for_stmt.body);
 
-        table.getForLoopVariables().erase(for_stmt.counter);
+        table.getForLoopVariables().erase(for_stmt.variable_name.text);
         table.popScope(for_stmt.body);
     }
 
@@ -544,7 +536,7 @@ class SemanticAnalyzer {
 
         table.pushScope(body);
         for (const ParameterDeclaration& param : routine.parameters)
-            table.addLocalParameter(param);
+            table.addLocalVariable(param.name, &param.type);
         if (routine.return_type)
             checkType(*routine.return_type);
         checkBlock(body);
@@ -564,7 +556,7 @@ class SemanticAnalyzer {
         for (const auto& [identifier, routine_info] : table.getRoutines()) {
             if (!routine_info.defined) {
                 throw SemanticError{"Forward declared routine \"" + identifier + "\" is never defined",
-                                    routine_info.declaration.get().span};
+                                    routine_info.declaration.get().name.span};
             }
         }
     }
@@ -577,21 +569,21 @@ class SemanticAnalyzer {
         while (it != program.declarations.end()) {
             if (std::holds_alternative<VariableDeclaration>(*it)) {
                 const auto& var_decl = std::get<VariableDeclaration>(*it);
-                if (!table.getGlobalScope().variables.at(var_decl.identifier).used) {
+                if (!table.getGlobalScope().variables.at(var_decl.name.text).used) {
                     it = program.declarations.erase(it);
                     continue;
                 }
             }
             if (std::holds_alternative<TypeDeclaration>(*it)) {
                 const auto& type_decl = std::get<TypeDeclaration>(*it);
-                if (!table.getGlobalScope().types.at(type_decl.identifier).used) {
+                if (!table.getGlobalScope().types.at(type_decl.name.text).used) {
                     it = program.declarations.erase(it);
                     continue;
                 }
             }
             if (std::holds_alternative<RoutineDeclaration>(*it)) {
                 auto& routine_decl = std::get<RoutineDeclaration>(*it);
-                if (!table.getRoutines().at(routine_decl.identifier).used) {
+                if (!table.getRoutines().at(routine_decl.name.text).used) {
                     it = program.declarations.erase(it);
                     continue;
                 }
@@ -605,7 +597,7 @@ class SemanticAnalyzer {
         for (auto& decl : program.declarations) {
             std::visit(overloaded{
                            [this](const VariableDeclaration& var) {
-                               table.addLocalVariable(var);
+                               table.addLocalVariable(var.name, var.type ? &*var.type : nullptr);
                                if (var.type)
                                    checkType(*var.type);
                                if (var.value)
@@ -616,17 +608,17 @@ class SemanticAnalyzer {
                                checkType(type.type);
                            },
                            [this](RoutineDeclaration& routine) {
-                               auto it = table.getRoutines().find(routine.identifier);
+                               auto it = table.getRoutines().find(routine.name.text);
                                if (it != table.getRoutines().end()) {
                                    if (it->second.defined && routine.body)
-                                       throw SemanticError{"Duplicate routine declaration: " + routine.identifier,
-                                                           routine.span};
+                                       throw SemanticError{"Duplicate routine declaration: " + routine.name.text,
+                                                           routine.name.span};
                                    if (routine.body)
                                        it->second.defined = true;
                                } else {
                                    bool is_defined = routine.body.has_value();
                                    table.getRoutines().emplace(
-                                       routine.identifier,
+                                       routine.name.text,
                                        RoutineInfo{.declaration = routine, .defined = is_defined, .used = false});
                                }
                                checkRoutineDeclaration(routine);
@@ -658,4 +650,3 @@ std::optional<SemanticError> analyze(Program& ast, std::string_view entry_point)
 }
 
 } // namespace analyzer
-
