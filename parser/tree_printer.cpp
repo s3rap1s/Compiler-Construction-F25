@@ -1,12 +1,12 @@
 #include "tree_printer.hpp"
 
 #include "parser/ast.hpp"
+#include "utils.hpp"
 
 #include <cstddef>
 #include <iostream>
 #include <memory>
 #include <optional>
-#include <string>
 #include <variant>
 #include <vector>
 
@@ -167,13 +167,13 @@ class TreePrinter {
             print_indent();
             out << "Operation: ";
             switch (op) {
-            case parser::Expression::Operation::And:
+            case parser::Expression::Operator::And:
                 out << "AND ";
                 break;
-            case parser::Expression::Operation::Or:
+            case parser::Expression::Operator::Or:
                 out << "OR ";
                 break;
-            case parser::Expression::Operation::Xor:
+            case parser::Expression::Operator::Xor:
                 out << "XOR ";
                 break;
             }
@@ -202,22 +202,22 @@ class TreePrinter {
             print_indent();
             out << "Operation: ";
             switch (relation.second->first) {
-            case parser::Relation::Operation::Less:
+            case parser::Relation::Operator::Less:
                 out << "< ";
                 break;
-            case parser::Relation::Operation::LessOrEqual:
+            case parser::Relation::Operator::LessOrEqual:
                 out << "<= ";
                 break;
-            case parser::Relation::Operation::Greater:
+            case parser::Relation::Operator::Greater:
                 out << "> ";
                 break;
-            case parser::Relation::Operation::GreaterOrEqual:
+            case parser::Relation::Operator::GreaterOrEqual:
                 out << ">= ";
                 break;
-            case parser::Relation::Operation::Equal:
+            case parser::Relation::Operator::Equal:
                 out << "= ";
                 break;
-            case parser::Relation::Operation::NotEqual:
+            case parser::Relation::Operator::NotEqual:
                 out << "/= ";
                 break;
             }
@@ -251,10 +251,10 @@ class TreePrinter {
             print_indent();
             out << "Operation: ";
             switch (op) {
-            case parser::NumberExpression::Operation::Plus:
+            case parser::NumberExpression::Operator::Plus:
                 out << "+ ";
                 break;
-            case parser::NumberExpression::Operation::Minus:
+            case parser::NumberExpression::Operator::Minus:
                 out << "- ";
                 break;
             }
@@ -280,13 +280,13 @@ class TreePrinter {
             print_indent();
             out << "Operation: ";
             switch (op) {
-            case parser::Summand::Operation::Multiply:
+            case parser::Summand::Operator::Multiply:
                 out << " * ";
                 break;
-            case parser::Summand::Operation::Divide:
+            case parser::Summand::Operator::Divide:
                 out << " / ";
                 break;
-            case parser::Summand::Operation::Modulo:
+            case parser::Summand::Operator::Modulo:
                 out << " % ";
                 break;
             }
@@ -340,23 +340,22 @@ class TreePrinter {
         indent_level++;
         print_indent();
         out << "Identifier: " << mp.variable.text << '\n';
-        for (const auto& accessor : mp.accessors) {
-            std::visit(
-                [this](const auto& acc) {
-                    using T = std::decay_t<decltype(acc)>;
-                    if constexpr (std::is_same_v<T, parser::Expression>) {
-                        print_indent();
-                        out << "Index:\n";
-                        indent_level++;
-                        printDeduced(acc);
-                        newline();
-                        indent_level--;
-                    } else if constexpr (std::is_same_v<T, std::string>) {
-                        print_indent();
-                        out << "Field: " << acc << '\n';
-                    }
-                },
-                accessor);
+        for (const auto& [key, _] : mp.accessors) {
+            std::visit(overloaded{
+                           [this](const parser::Expression& index) {
+                               print_indent();
+                               out << "Index:\n";
+                               indent_level++;
+                               printDeduced(index);
+                               newline();
+                               indent_level--;
+                           },
+                           [this](const parser::Identifier& field_name) {
+                               print_indent();
+                               out << "Field: " << field_name.text << '\n';
+                           },
+                       },
+                       key);
         }
         indent_level--;
     }

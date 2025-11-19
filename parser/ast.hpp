@@ -3,6 +3,7 @@
 #include "common.hpp"
 #include "lexer/tokens.hpp"
 
+#include <cstddef>
 #include <memory>
 #include <optional>
 #include <string>
@@ -12,18 +13,21 @@
 
 namespace parser {
 
-/* ============
- * Expressions
- * ============
- */
 struct Identifier {
     Span span;
     std::string text;
 };
 
+using TypeId = std::size_t;
+
+/* ============
+ * Expressions
+ * ============
+ */
+
 struct Expression;
 
-// not an general expression. Only for print statements
+// Not an general expression. Only for print statements
 struct StringLiteral {
     Span span;
     std::string value;
@@ -62,11 +66,15 @@ using Primary = std::variant<IntegerLiteral,
 struct RoutineCall {
     Identifier routine_name;
     std::vector<Expression> arguments;
+    TypeId type = -1;
 };
 
 struct ModifiablePrimary {
+    struct Accessor; // wait until Expression is defined
+
     Identifier variable;
-    std::vector<std::variant<Expression, Identifier>> accessors;
+    std::vector<Accessor> accessors;
+    TypeId variable_type = -1;
 };
 
 struct UnarySign {
@@ -78,39 +86,52 @@ struct UnarySign {
     Span sign_span;
     std::unique_ptr<Primary> operand;
     Sign sign;
+    TypeId type = -1;
 };
 
 struct Summand {
-    enum class Operation : char {
+    enum class Operator : char {
         Multiply,
         Divide,
         Modulo,
     };
+    struct Operation {
+        Operator operator_;
+        Primary next_operand;
+        TypeId result_type = -1;
+    };
 
     Primary first; // same as Factor
-    std::vector<std::pair<Operation, Primary>> rest;
+    std::vector<Operation> rest;
+    TypeId type = -1;
 
     // A constructor's declaration keeps the Clangd (but not Clang++) problem away
-    inline Summand(Primary first, std::vector<std::pair<Operation, Primary>> rest);
+    inline Summand(Primary first, std::vector<Operation> rest);
 };
 
 struct NumberExpression {
-    enum class Operation : char {
+    enum class Operator : char {
         Plus,
         Minus,
     };
+    struct Operation {
+        Operator operator_;
+        Summand next_operand;
+        TypeId result_type = -1;
+    };
 
     Summand first;
-    std::vector<std::pair<Operation, Summand>> rest;
+    std::vector<Operation> rest;
+    TypeId type = -1;
 
-    inline NumberExpression(Summand first, std::vector<std::pair<Operation, Summand>> rest);
+    inline NumberExpression(Summand first, std::vector<Operation> rest);
 
     // NumberExpression() = default; // Explicit default constructor keeps the Clang/Clangd problem away // NOLINT
     // no longer needed due to custom constructor
 };
 
 struct Relation {
-    enum class Operation : char {
+    enum class Operator : char {
         Less,
         LessOrEqual,
         Greater,
@@ -118,27 +139,42 @@ struct Relation {
         Equal,
         NotEqual,
     };
+    struct Operation {
+        Operator operator_;
+        NumberExpression next_operand;
+    };
 
     NumberExpression first;
-    std::optional<std::pair<Operation, NumberExpression>> second;
+    std::optional<Operation> second;
+    TypeId type = -1;
 };
 
 struct NotExpression {
     Span not_span;
     Primary operand;
+    TypeId type = -1;
 };
 
 using BooleanExpression = std::variant<Relation, NotExpression>;
 
 struct Expression {
-    enum class Operation : char {
+    enum class Operator : char {
         And,
         Or,
         Xor,
     };
 
     BooleanExpression first;
-    std::vector<std::pair<Operation, BooleanExpression>> rest;
+    std::vector<std::pair<Operator, BooleanExpression>> rest;
+    TypeId type = -1;
+};
+
+struct ModifiablePrimary::Accessor {
+    std::variant<Expression, Identifier> key;
+    TypeId type = -1;
+
+    template <typename... Args>
+    explicit Accessor(Args&&... args) : key{std::forward<Args>(args)...} {}
 };
 
 /* ============
@@ -169,6 +205,7 @@ struct RecordType {
 struct ArrayType {
     std::optional<Expression> size;
     std::unique_ptr<Type> element_type;
+    std::size_t computed_size = -1;
 };
 
 /* ============
@@ -236,6 +273,7 @@ struct VariableDeclaration {
     std::optional<Type> type;
     std::optional<Expression> value;
     // mamoi klyanus', ne budet dva optional pustimi. (c) Maxim Fomin
+    TypeId resolved_type = -1;
 };
 
 struct ParameterDeclaration {
@@ -263,11 +301,9 @@ struct Program {
  * Constructors' definitions
  * =========================
  */
-NumberExpression::NumberExpression(Summand first, std::vector<std::pair<Operation, Summand>> rest)
+NumberExpression::NumberExpression(Summand first, std::vector<Operation> rest)
     : first{std::move(first)}, rest{std::move(rest)} {}
 
-Summand::Summand(Primary first, std::vector<std::pair<Operation, Primary>> rest)
-    : first{std::move(first)}, rest{std::move(rest)} {}
+Summand::Summand(Primary first, std::vector<Operation> rest) : first{std::move(first)}, rest{std::move(rest)} {}
 
 } // namespace parser
-

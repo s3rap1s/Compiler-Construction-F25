@@ -3,10 +3,14 @@
 #include "parser/ast.hpp"
 #include "utils.hpp"
 
+#include <cstddef>
 #include <iterator>
+#include <optional>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
+#include <utility>
+#include <vector>
 
 namespace analyzer {
 
@@ -15,33 +19,65 @@ using namespace parser;
 struct SymbolTable;
 
 struct VarInfo {
-    const Type* type;
-    bool used;
-};
-
-struct TypeInfo {
-    std::reference_wrapper<const Type> type;
-    bool used;
+    TypeId type = -1;
+    std::optional<Expression> initial_value;
+    bool used = false;
 };
 
 struct RoutineInfo {
     std::reference_wrapper<const RoutineDeclaration> declaration;
     bool defined;
-    bool used;
+    bool used = false;
 };
 
 struct Scope {
     const Block* parent;
     std::unordered_map<std::string, VarInfo> variables;
-    std::unordered_map<std::string, TypeInfo> types;
+    std::unordered_map<std::string, TypeId> types;
 
     explicit Scope(const Block* parent) : parent{parent} {}
 };
 
+/* ============
+ * Types
+ * ============
+ */
+struct IntegerTypeInfo {};
+
+struct RealTypeInfo {};
+
+struct BooleanTypeInfo {};
+
+struct RecordTypeInfo {
+    std::unordered_map<std::string, TypeId> fields;
+};
+
+struct ArrayTypeInfo {
+    std::size_t size;
+    TypeId element_type;
+};
+
+struct TypeInfo {
+    using Definition = std::variant<IntegerTypeInfo, RealTypeInfo, BooleanTypeInfo, RecordTypeInfo, ArrayTypeInfo>;
+
+    Definition definition;
+    std::string name;
+    bool used = false;
+
+    TypeInfo(Definition definition, std::string name) : definition{std::move(definition)}, name{std::move(name)} {}
+};
+
 struct SymbolTable {
   private:
+    std::vector<TypeInfo> types{
+        {IntegerTypeInfo{}, "integer"}, {RealTypeInfo{}, "real"}, {BooleanTypeInfo{}, "boolean"}};
+    static constexpr std::size_t IntegerTypeId = 0;
+    static constexpr std::size_t RealTypeId = 1;
+    static constexpr std::size_t BooleanTypeId = 2;
+
     std::unordered_map<std::string, RoutineInfo> routines;
     std::unordered_set<std::string> for_loop_variables;
+
     std::unordered_map<const parser::Block*, Scope> scopes;
     const parser::Block* current_block = nullptr;
 
@@ -100,11 +136,15 @@ struct SymbolTable {
     bool typeExists(const Identifier& type_name) const;
     bool typeExists(const Type& type) const;
 
-    void addLocalVariable(Identifier name, const Type* type);
+    void addLocalVariable(Identifier name, const Type& type);
     void addLocalType(Identifier name, const Type& type);
 
-    const Type& getVariableType(const Identifier& name) const;
-    const Type& resolveType(const Type& type) const;
+    ArrayTypeInfo createArrayTypeInfo(const parser::ArrayType& type);
+    static RecordTypeInfo createRecordTypeInfo(const parser::RecordType& type);
+    const TypeInfo& getTypeInfo(TypeId type_id) const;
+    TypeId resolveType(const Type& type);
+    TypeId resolveType(const Identifier& type);
+    TypeId getVariableType(const Identifier& name) const;
 
     void markVarUsed(const std::string& identifier);
     void markTypeUsed(const std::string& identifier);
