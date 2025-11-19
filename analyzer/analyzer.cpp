@@ -25,8 +25,8 @@ using namespace parser;
 namespace {
 
 bool areForNumericOperation(TypeId first, TypeId second) {
-    return (first != SymbolTable::IntegerTypeId && first != SymbolTable::RealTypeId) ||
-           (second != SymbolTable::IntegerTypeId && second != SymbolTable::RealTypeId);
+    return (first == SymbolTable::IntegerTypeId || first == SymbolTable::RealTypeId) &&
+           (second == SymbolTable::IntegerTypeId || second == SymbolTable::RealTypeId);
 }
 
 } // namespace
