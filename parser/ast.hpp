@@ -269,13 +269,5 @@ NumberExpression::NumberExpression(Summand first, std::vector<std::pair<Operatio
 Summand::Summand(Primary first, std::vector<std::pair<Operation, Primary>> rest)
     : first{std::move(first)}, rest{std::move(rest)} {}
 
-/* ===============
- * Other functions
- * ===============
- */
-inline Span getSpan(const Type& type) {
-    return std::visit([](const auto& /*t*/) { return Span{}; }, type);
-}
-
 } // namespace parser
 
