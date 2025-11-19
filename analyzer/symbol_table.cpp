@@ -167,7 +167,7 @@ RecordTypeInfo SymbolTable::createRecordTypeInfo(const parser::RecordType& type)
 }
 
 const TypeInfo& SymbolTable::getTypeInfo(TypeId type_id) const {
-    assert(type_id >= 0 && "Unresolved type given");
+    assert(type_id != static_cast<TypeId>(-1) && "Unresolved type given");
     return types[type_id];
 }
 

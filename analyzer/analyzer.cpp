@@ -244,6 +244,7 @@ class SemanticAnalyzer {
                                   if (array.size)
                                       checkExpression(*array.size);
                                   // TODO: compute size
+                                  array.computed_size = 1;
                               },
                               [this](RecordType& record) {
                                   for (VariableDeclaration& field : record.fields) {
@@ -382,7 +383,7 @@ class SemanticAnalyzer {
         const bool is_foreach = std::holds_alternative<Expression>(for_stmt.range);
         TypeId variable_type = -1;
 
-        if (!is_foreach) {
+        if (is_foreach) {
             auto& iterable = std::get<Expression>(for_stmt.range);
             TypeId array_type_id = checkExpression(iterable);
             const TypeInfo& array_type_info = table.getTypeInfo(array_type_id);

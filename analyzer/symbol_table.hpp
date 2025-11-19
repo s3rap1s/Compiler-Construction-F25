@@ -77,7 +77,7 @@ struct SymbolTable {
     std::unordered_map<std::string, RoutineInfo> routines;
     std::unordered_set<std::string> for_loop_variables;
 
-    std::unordered_map<const parser::Block*, Scope> scopes;
+    std::unordered_map<const parser::Block*, Scope> scopes; // initialize with global scope
     const parser::Block* current_block = nullptr;
 
     template <bool Const>
@@ -121,6 +121,10 @@ struct SymbolTable {
     static constexpr TypeId IntegerTypeId = 0;
     static constexpr TypeId RealTypeId = 1;
     static constexpr TypeId BooleanTypeId = 2;
+
+    SymbolTable() {
+        scopes.emplace(nullptr, Scope{nullptr});
+    }
 
     std::unordered_map<std::string, RoutineInfo>& getRoutines();
     std::unordered_map<const Block*, Scope>& getScopes();
