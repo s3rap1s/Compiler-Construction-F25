@@ -3,6 +3,7 @@
 #include "common.hpp"
 #include "lexer/tokens.hpp"
 
+#include <concepts>
 #include <cstddef>
 #include <memory>
 #include <optional>
@@ -169,11 +170,17 @@ struct Expression {
     TypeId type = -1;
 };
 
+struct Index {
+    Span bracket_span;
+    Expression value;
+};
+
 struct ModifiablePrimary::Accessor {
-    std::variant<Expression, Identifier> key;
+    std::variant<Index, Identifier> key;
     TypeId type = -1;
 
     template <typename... Args>
+        requires std::constructible_from<decltype(key), Args&&...>
     explicit Accessor(Args&&... args) : key{std::forward<Args>(args)...} {}
 };
 
@@ -312,5 +319,21 @@ NumberExpression::NumberExpression(Summand first, std::vector<Operation> rest)
     : first{std::move(first)}, rest{std::move(rest)} {}
 
 Summand::Summand(Primary first, std::vector<Operation> rest) : first{std::move(first)}, rest{std::move(rest)} {}
+
+/* =========================
+ * Helpers
+ * =========================
+ */
+Span getSpan(const Expression& expr);
+
+Span getSpan(const BooleanExpression& expr);
+
+Span getSpan(const Relation& relation);
+
+Span getSpan(const NumberExpression& expr);
+
+Span getSpan(const Summand& summand);
+
+Span getSpan(const Primary& primary);
 
 } // namespace parser
