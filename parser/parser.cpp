@@ -347,7 +347,7 @@ class Parser {
         while (auto op_keyword = consumeKeywords<SPT::And, SPT::Or, SPT::Xor>()) {
             BIND(next, parseBooleanExpression());
 
-            using Op = Expression::Operation;
+            using Op = Expression::Operator;
             using MapPair = std::pair<SPT, Op>;
             static constexpr std::initializer_list<MapPair> map = {
                 {SPT::And, Op::And}, {SPT::Or, Op::Or}, {SPT::Xor, Op::Xor}};
@@ -379,7 +379,7 @@ class Parser {
                                               SPT::NotEqual>()) {
             BIND(next, parseNumberExpression());
 
-            using Op = Relation::Operation;
+            using Op = Relation::Operator;
             using MapPair = std::pair<SPT, Op>;
             static constexpr std::initializer_list<MapPair> map = {{SPT::Less, Op::Less},
                                                                    {SPT::LessEqual, Op::LessOrEqual},
@@ -389,7 +389,7 @@ class Parser {
                                                                    {SPT::NotEqual, Op::NotEqual}};
             Op op = std::ranges::find(map, op_keyword->payload, &MapPair::first)->second;
 
-            decltype(Relation::second) second{{op, std::move(next)}};
+            decltype(Relation::second) second{{.operator_ = op, .next_operand = std::move(next)}};
             return Relation{.first = std::move(first), .second = std::move(second)};
         }
         return Relation{.first = std::move(first), .second = std::nullopt};
@@ -403,7 +403,7 @@ class Parser {
         while (auto op_keyword = consumeKeywords<SPT::Plus, SPT::Minus>()) {
             BIND(next, parseSummand());
 
-            using Op = NumberExpression::Operation;
+            using Op = NumberExpression::Operator;
             using MapPair = std::pair<SPT, Op>;
             static constexpr std::initializer_list<MapPair> map = {{SPT::Plus, Op::Plus}, {SPT::Minus, Op::Minus}};
             Op operation = std::ranges::find(map, op_keyword->payload, &MapPair::first)->second;
@@ -421,7 +421,7 @@ class Parser {
         while (auto op_keyword = consumeKeywords<SPT::Multiply, SPT::Divide, SPT::Modulo>()) {
             BIND(next, parsePrimary());
 
-            using Op = Summand::Operation;
+            using Op = Summand::Operator;
             using MapPair = std::pair<SPT, Op>;
             static constexpr std::initializer_list<MapPair> map = {
                 {SPT::Multiply, Op::Multiply}, {SPT::Divide, Op::Divide}, {SPT::Modulo, Op::Modulo}};

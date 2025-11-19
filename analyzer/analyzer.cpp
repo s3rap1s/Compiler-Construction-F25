@@ -107,13 +107,13 @@ class SemanticAnalyzer {
     const Type& checkField(const ModifiablePrimary& mp, const Type& type_of_last, const Identifier& field_name) {
         const Type& resolved_type = table.resolveType(type_of_last);
 
-        if (std::holds_alternative<ArrayType>(resolved_type)) {
+        if (std::holds_alternative<ArrayTypeInfo>(resolved_type)) {
             if (field_name.text == "size")
-                return IntegerType{};
+                return IntegerTypeInfo{};
             throw SemanticError{"Variable " + mp.variable.text + " has no field named '" + field_name.text + "'",
                                 field_name.span};
         }
-        if (!std::holds_alternative<RecordType>(resolved_type))
+        if (!std::holds_alternative<RecordTypeInfo>(resolved_type))
             throw SemanticError{"Cannot access field '" + field_name.text + "' on non-record type", field_name.span};
 
         for (const VariableDeclaration& field : std::get<RecordType>(resolved_type).fields) {
@@ -131,11 +131,11 @@ class SemanticAnalyzer {
     const Type& checkIndex(const ModifiablePrimary& mp, const Type& type_of_last, const Expression& index) {
         const Type& resolved_type = table.resolveType(type_of_last);
 
-        if (!std::holds_alternative<ArrayType>(resolved_type))
+        if (!std::holds_alternative<ArrayTypeInfo>(resolved_type))
             throw SemanticError{"Cannot index non-array type", mp.variable.span};
 
         checkExpression(index);
-        const auto& array = std::get<ArrayType>(resolved_type);
+        const auto& array = std::get<ArrayTypeInfo>(resolved_type);
         return *array.element_type;
     }
 
@@ -166,7 +166,7 @@ class SemanticAnalyzer {
                                   table.typeExists(type_name);
                                   table.markTypeUsed(type_name.text);
                               },
-                              [this](const ArrayType& array) {
+                              [this](const ArrayTypeInfo& array) {
                                   checkType(*array.element_type);
                                   if (array.size)
                                       checkExpression(*array.size);
@@ -175,7 +175,7 @@ class SemanticAnalyzer {
                                       table.markTypeUsed(type_name.text);
                                   }
                               },
-                              [this](const RecordType& record) {
+                              [this](const RecordTypeInfo& record) {
                                   for (const VariableDeclaration& field : record.fields) {
                                       if (field.type)
                                           checkType(*field.type);
@@ -308,7 +308,7 @@ class SemanticAnalyzer {
 
     void checkForStatement(const ForStatement& for_stmt) {
         table.pushScope(for_stmt.body);
-        const Type& variable_type = IntegerType{};
+        const Type& variable_type = IntegerTypeInfo{};
         table.addLocalVariable(for_stmt.variable_name, &variable_type);
         table.markVarUsed(for_stmt.variable_name.text);
         table.getForLoopVariables().insert(for_stmt.variable_name.text);
