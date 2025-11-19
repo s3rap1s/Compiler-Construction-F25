@@ -68,6 +68,7 @@ struct SymbolTable {
         }
     };
 
+    // inspired by std::ranges::views
     template <bool Const>
     struct ScopesView {
         MaybeConst<Const, SymbolTable>* table;
@@ -99,10 +100,10 @@ struct SymbolTable {
     bool typeExists(const Identifier& type_name) const;
     bool typeExists(const Type& type) const;
 
-    void addLocalVariable(const Identifier& id, const Type* type);
-    void addLocalType(const TypeDeclaration& td);
+    void addLocalVariable(Identifier name, const Type* type);
+    void addLocalType(Identifier name, const Type& type);
 
-    const Type& getVariableType(const ModifiablePrimary& mp) const;
+    const Type& getVariableType(const Identifier& name) const;
     const Type& resolveType(const Type& type) const;
 
     void markVarUsed(const std::string& identifier);

@@ -74,28 +74,28 @@ bool SymbolTable::typeExists(const Type& type) const {
     return true;
 }
 
-void SymbolTable::addLocalVariable(const Identifier& id, const Type* type) {
+void SymbolTable::addLocalVariable(Identifier name, const Type* type) {
     Scope& last_scope = getCurrentScope();
-    if (last_scope.variables.contains(id.text))
-        throw SemanticError{"Duplicate variable declaration: " + id.text, id.span};
-    last_scope.variables.emplace(id.text, VarInfo{.type = type, .used = false});
+    if (last_scope.variables.contains(name.text))
+        throw SemanticError{"Duplicate variable declaration: " + name.text, name.span};
+    last_scope.variables.emplace(std::move(name.text), VarInfo{.type = type, .used = false});
 }
 
-void SymbolTable::addLocalType(const TypeDeclaration& td) {
+void SymbolTable::addLocalType(Identifier name, const Type& type) {
     Scope& last_scope = getCurrentScope();
-    if (last_scope.types.contains(td.name.text))
-        throw SemanticError{"Duplicate type declaration: " + td.name.text, td.name.span};
-    last_scope.types.emplace(td.name.text, TypeInfo{.type = td.type, .used = false});
+    if (last_scope.types.contains(name.text))
+        throw SemanticError{"Duplicate type declaration: " + name.text, name.span};
+    last_scope.types.emplace(std::move(name.text), TypeInfo{.type = type, .used = false});
 }
 
-const Type& SymbolTable::getVariableType(const ModifiablePrimary& mp) const {
+const Type& SymbolTable::getVariableType(const Identifier& name) const {
     for (const Scope& scope : getScopesView()) {
-        if (auto it = scope.variables.find(mp.variable.text);
+        if (auto it = scope.variables.find(name.text);
             it != scope.variables.end() && it->second.type != nullptr) {
             return *it->second.type;
         }
     }
-    throw SemanticError{"Undeclared variable: " + mp.variable.text, mp.variable.span};
+    throw SemanticError{"Undeclared variable: " + name.text, name.span};
 }
 
 const Type& SymbolTable::resolveType(const Type& type) const {

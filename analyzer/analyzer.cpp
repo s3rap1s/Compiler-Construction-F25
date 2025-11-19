@@ -85,7 +85,7 @@ class SemanticAnalyzer {
         table.varExists(mp);
         table.markVarUsed(mp.variable.text);
         if (!mp.accessors.empty()) {
-            std::reference_wrapper<const Type> current_type = table.getVariableType(mp);
+            std::reference_wrapper<const Type> current_type = table.getVariableType(mp.variable);
             for (const auto& accessor : mp.accessors) {
                 current_type = checkAccessor(mp, current_type.get(), accessor);
             }
@@ -201,7 +201,7 @@ class SemanticAnalyzer {
                                    checkExpression(*var.value);
                            },
                            [&](const TypeDeclaration& type) {
-                               table.addLocalType(type);
+                               table.addLocalType(type.name, type.type);
                                checkType(type.type);
                            },
                            [&](const Statement& stmt) { checkStatement(stmt); },
@@ -412,7 +412,7 @@ class SemanticAnalyzer {
                                    checkExpression(*var.value);
                            },
                            [this](const TypeDeclaration& type) {
-                               table.addLocalType(type);
+                               table.addLocalType(type.name, type.name);
                                checkType(type.type);
                            },
                            [this](RoutineDeclaration& routine) {
