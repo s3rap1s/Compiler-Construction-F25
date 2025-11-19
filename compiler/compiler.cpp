@@ -38,37 +38,28 @@ struct Compiler {
     SymbolTable* symbolTable;
     Program& program; // NOLINT(*ref*)
 
-    llvm::Type* getLLVMType(const parser::Type& type) {
-        if (std::holds_alternative<parser::IntegerType>(type)) {
-            return builder->getInt32Ty();
-        }
-        if (std::holds_alternative<parser::RealType>(type)) {
-            return builder->getDoubleTy();
-        }
-        if (std::holds_alternative<parser::BoolType>(type)) {
-            return builder->getInt1Ty();
-        }
-        if (std::holds_alternative<parser::ArrayType>(type)) {
-            const auto& arrayType = std::get<parser::ArrayType>(type);
-            llvm::Type* elementType = getLLVMType(*arrayType.element_type);
-
-            if (arrayType.size) {
-                if (auto* size = dyn_cast<ConstantInt>(generateExpression(*arrayType.size))) {
-                    return llvm::ArrayType::get(elementType, size->getSExtValue());
-                }
-                // TODO: if size is not int, cast it to int (from double or bool)
-            }
-            return builder->getPtrTy();
-        }
-        if (std::holds_alternative<parser::RecordType>(type)) {
-            const auto& recordType = std::get<RecordType>(type);
-            std::vector<llvm::Type*> fieldTypes;
-            for (const auto& field : recordType.fields) {
-                fieldTypes.push_back(getLLVMType(*field.type));
-            }
-            return StructType::get(*context, fieldTypes);
-        }
-        return getLLVMType(symbolTable->resolveType(std::get<Identifier>(type)));
+    llvm::Type* getLLVMType(const analyzer::TypeInfo& typeInfo) {
+        const auto& type = typeInfo.definition;
+        return std::visit(overloaded{
+                              [this](const analyzer::IntegerTypeInfo&) -> llvm::Type* { return builder->getInt32Ty(); },
+                              [this](const analyzer::RealTypeInfo&) -> llvm::Type* { return builder->getDoubleTy(); },
+                              [this](const analyzer::BooleanTypeInfo&) -> llvm::Type* { return builder->getInt1Ty(); },
+                              [this, type](const analyzer::ArrayTypeInfo&) -> llvm::Type* {
+                                  const auto& arrayType = std::get<analyzer::ArrayTypeInfo>(type);
+                                  llvm::Type* elementType =
+                                      getLLVMType(symbolTable->getTypeInfo(arrayType.element_type));
+                                  return llvm::ArrayType::get(elementType, arrayType.size);
+                              },
+                              [this, type](const analyzer::RecordTypeInfo&) -> llvm::Type* {
+                                  const auto& recordType = std::get<RecordTypeInfo>(type);
+                                  std::vector<llvm::Type*> fieldTypes;
+                                  for (const auto& [name, typeId] : recordType.fields) {
+                                      fieldTypes.push_back(getLLVMType(symbolTable->getTypeInfo(typeId)));
+                                  }
+                                  return StructType::get(*context, fieldTypes);
+                              },
+                          },
+                          type);
     }
 
     Value* generateExpression(const parser::Expression& expr) {
@@ -78,13 +69,13 @@ struct Compiler {
             Value* right = generateBooleanExpression(expr);
 
             switch (op) {
-            case parser::Expression::Operation::And:
+            case parser::Expression::Operator::And:
                 result = builder->CreateAnd(result, right, "andtmp");
                 break;
-            case parser::Expression::Operation::Or:
+            case parser::Expression::Operator::Or:
                 result = builder->CreateOr(result, right, "ortmp");
                 break;
-            case parser::Expression::Operation::Xor:
+            case parser::Expression::Operator::Xor:
                 result = builder->CreateXor(result, right, "xortmp");
                 break;
             }
@@ -107,22 +98,22 @@ struct Compiler {
             const auto& [op, numExpr] = *relation.second;
             Value* right = generateNumberExpression(numExpr);
             switch (op) {
-            case parser::Relation::Operation::Less:
+            case parser::Relation::Operator::Less:
                 result = builder->CreateICmpSLT(result, right);
                 break;
-            case parser::Relation::Operation::LessOrEqual:
+            case parser::Relation::Operator::LessOrEqual:
                 result = builder->CreateICmpSLE(result, right);
                 break;
-            case parser::Relation::Operation::Greater:
+            case parser::Relation::Operator::Greater:
                 result = builder->CreateICmpSGT(result, right);
                 break;
-            case parser::Relation::Operation::GreaterOrEqual:
+            case parser::Relation::Operator::GreaterOrEqual:
                 result = builder->CreateICmpSGE(result, right);
                 break;
-            case parser::Relation::Operation::Equal:
+            case parser::Relation::Operator::Equal:
                 result = builder->CreateICmpEQ(result, right);
                 break;
-            case parser::Relation::Operation::NotEqual:
+            case parser::Relation::Operator::NotEqual:
                 result = builder->CreateICmpNE(result, right);
                 break;
             }
@@ -138,18 +129,20 @@ struct Compiler {
     Value* generateNumberExpression(const parser::NumberExpression& numExpr) {
         Value* result = generateSummand(numExpr.first);
 
-        for (const auto& [op, summand] : numExpr.rest) {
+        for (const auto& operation : numExpr.rest) {
+            const auto& op = operation.operator_;
+            const auto& summand = operation.next_operand;
             Value* right = generateSummand(summand);
 
             switch (op) {
-            case parser::NumberExpression::Operation::Plus:
+            case parser::NumberExpression::Operator::Plus:
                 if (result->getType()->isIntegerTy()) {
                     result = builder->CreateAdd(result, right, "addtmp");
                 } else {
                     result = builder->CreateFAdd(result, right, "addtmp");
                 }
                 break;
-            case parser::NumberExpression::Operation::Minus:
+            case parser::NumberExpression::Operator::Minus:
                 if (result->getType()->isIntegerTy()) {
                     result = builder->CreateSub(result, right, "subtmp");
                 } else {
@@ -164,25 +157,27 @@ struct Compiler {
     Value* generateSummand(const parser::Summand& summand) {
         Value* result = generatePrimary(summand.first);
 
-        for (const auto& [op, primary] : summand.rest) {
+        for (const auto& operation : summand.rest) {
+            const auto& primary = operation.next_operand;
+            const auto& op = operation.operator_;
             Value* right = generatePrimary(primary);
 
             switch (op) {
-            case parser::Summand::Operation::Multiply:
+            case parser::Summand::Operator::Multiply:
                 if (result->getType()->isIntegerTy()) {
                     result = builder->CreateMul(result, right, "multmp");
                 } else {
                     result = builder->CreateFMul(result, right, "multmp");
                 }
                 break;
-            case parser::Summand::Operation::Divide:
+            case parser::Summand::Operator::Divide:
                 if (result->getType()->isIntegerTy()) {
                     result = builder->CreateSDiv(result, right, "divtmp");
                 } else {
                     result = builder->CreateFDiv(result, right, "divtmp");
                 }
                 break;
-            case parser::Summand::Operation::Modulo:
+            case parser::Summand::Operator::Modulo:
                 if (result->getType()->isIntegerTy()) {
                     result = builder->CreateSRem(result, right, "modtmp");
                 } else {
@@ -242,30 +237,41 @@ struct Compiler {
         Value* initialValue = nullptr;
 
         if (declaration.type) {
-            llvmType = getLLVMType(*declaration.type);
+            llvmType = getLLVMType(symbolTable->getTypeInfo(declaration.resolved_type));
+            if (declaration.value) {
+                initialValue = generateExpression(*declaration.value);
+                if (declaration.resolved_type != declaration.value->type) {
+                    initialValue = generateCast(declaration.value, declaration.value->type);
+                }
+            }
         } else if (declaration.value) {
             initialValue = generateExpression(*declaration.value);
-            llvmType = initialValue->getType();
+            llvmType = getLLVMType(symbolTable->getTypeInfo(declaration.resolved_type));
+            assert(initialValue->getType() == llvmType);
         } else {
             throw CompileError{"Variable declaration " + declaration.name.text +
                                    " must have either type or initial value",
                                declaration.name.span}; // Ya zshe mamoi klyalsya, ne budet takogo (c) Maxim Fomin
         }
+
         // TODO: what next?
     }
 
-    Function* generateRoutineDeclaration(const parser::RoutineDeclaration& routine) {
-        llvm::Type* returnType = routine.return_type ? getLLVMType(*routine.return_type) : builder->getVoidTy();
+    Function* generateRoutineDeclaration(const parser::RoutineDeclaration& declaration) {
+        llvm::Type* returnType = declaration.return_type
+                                     ? getLLVMType(symbolTable->getTypeInfo(declaration.resolved_return_type))
+                                     : builder->getVoidTy();
         std::vector<llvm::Type*> paramTypes;
-        paramTypes.reserve(routine.parameters.size());
-        for (const auto& param : routine.parameters) {
+        paramTypes.reserve(declaration.parameters.size());
+        for (const auto& param : declaration.parameters) {
             paramTypes.push_back(getLLVMType(param.type));
         }
         FunctionType* functionType = FunctionType::get(returnType, paramTypes, false);
-        Function* function = Function::Create(functionType, Function::InternalLinkage, routine.name.text, module.get());
+        Function* function =
+            Function::Create(functionType, Function::InternalLinkage, declaration.name.text, module.get());
         long long idx = 0;
         for (auto& param : function->args()) {
-            param.setName(routine.parameters[idx].name.text);
+            param.setName(declaration.parameters[idx].name.text);
         }
         return function;
     }

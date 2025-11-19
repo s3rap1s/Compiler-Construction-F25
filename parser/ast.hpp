@@ -286,6 +286,7 @@ struct RoutineDeclaration {
     std::vector<ParameterDeclaration> parameters;
     std::optional<std::variant<Block, Expression>> body;
     std::optional<Type> return_type;
+    TypeId resolved_return_type = -1;
 };
 
 struct TypeDeclaration {
