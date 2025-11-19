@@ -105,9 +105,10 @@ class SemanticAnalyzer {
 
     TypeId checkSummand(Summand& summand) {
         TypeId last_type = checkPrimary(summand.first);
-        for (auto& [_, operand, operation_type] : summand.rest) {
+        for (auto& [op, operand, operation_type] : summand.rest) {
             const TypeId operand_type = checkPrimary(operand);
-            if (!areForNumericOperation(last_type, operand_type)) {
+            if (!areForNumericOperation(last_type, operand_type) ||
+                (op == Summand::Operator::Modulo && operand_type == table.RealTypeId)) {
                 const TypeInfo& info1 = table.getTypeInfo(last_type);
                 const TypeInfo& info2 = table.getTypeInfo(operand_type);
                 throw SemanticError{"Invalid types '" + info1.name + "' and '" + info2.name + "' for operation",

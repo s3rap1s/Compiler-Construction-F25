@@ -31,6 +31,7 @@ using namespace parser;
 using namespace analyzer;
 using namespace llvm;
 
+// NOLINTBEGIN(*recursion*)
 struct Compiler {
   private:
     std::unique_ptr<llvm::LLVMContext> context = std::make_unique<LLVMContext>();
@@ -199,7 +200,7 @@ struct Compiler {
                     result = builder->CreateSRem(result, right, "modtmp");
                 } else {
                     throw CompileError("Modulo operation not supported for floating point types",
-                                       {.begin = 0, .end = 0, .line_no = 0, .column_no = 0}); // TODO: normal span
+                                       getSpan(summand));
                 }
                 break;
             }
@@ -356,6 +357,7 @@ struct Compiler {
 
     std::optional<CompileError> compile() {}
 };
+// NOLINTEND(*recursion*)
 
 std::optional<CompileError> compile(Program& ast, SymbolTable* symbolTable) {
     Compiler compiler{ast, symbolTable};
