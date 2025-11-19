@@ -71,9 +71,6 @@ struct SymbolTable {
   private:
     std::vector<TypeInfo> types{
         {IntegerTypeInfo{}, "integer"}, {RealTypeInfo{}, "real"}, {BooleanTypeInfo{}, "boolean"}};
-    static constexpr std::size_t IntegerTypeId = 0;
-    static constexpr std::size_t RealTypeId = 1;
-    static constexpr std::size_t BooleanTypeId = 2;
 
     std::unordered_map<std::string, RoutineInfo> routines;
     std::unordered_set<std::string> for_loop_variables;
@@ -119,6 +116,10 @@ struct SymbolTable {
     };
 
   public:
+    static constexpr TypeId IntegerTypeId = 0;
+    static constexpr TypeId RealTypeId = 1;
+    static constexpr TypeId BooleanTypeId = 2;
+
     std::unordered_map<std::string, RoutineInfo>& getRoutines();
     std::unordered_map<const Block*, Scope>& getScopes();
     std::unordered_set<std::string>& getForLoopVariables();
