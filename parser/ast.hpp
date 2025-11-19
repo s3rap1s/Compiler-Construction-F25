@@ -67,7 +67,7 @@ using Primary = std::variant<IntegerLiteral,
 struct RoutineCall {
     Identifier routine_name;
     std::vector<Expression> arguments;
-    TypeId type = -1;
+    std::optional<TypeId> type = -1;
 };
 
 struct ModifiablePrimary {
@@ -153,7 +153,6 @@ struct Relation {
 struct NotExpression {
     Span not_span;
     Primary operand;
-    TypeId type = -1;
 };
 
 using BooleanExpression = std::variant<Relation, NotExpression>;
@@ -212,6 +211,7 @@ struct RecordType {
 struct ArrayType {
     std::optional<Expression> size;
     std::unique_ptr<Type> element_type;
+    TypeId resolved_element_type = -1;
     std::size_t computed_size = -1;
 };
 
