@@ -414,8 +414,8 @@ class Parser {
     }
 
     ParsingExpected<Summand> parseSummand() {
-        Summand summand;
-        BIND_SET(summand.first, parsePrimary());
+        BIND(first, parsePrimary());
+        decltype(Summand::rest) rest;
 
         using SPT = SyntaxPart;
         while (auto op_keyword = consumeKeywords<SPT::Multiply, SPT::Divide, SPT::Modulo>()) {
@@ -427,9 +427,9 @@ class Parser {
                 {SPT::Multiply, Op::Multiply}, {SPT::Divide, Op::Divide}, {SPT::Modulo, Op::Modulo}};
             Op operation = std::ranges::find(map, op_keyword->payload, &MapPair::first)->second;
 
-            summand.rest.emplace_back(operation, std::move(next));
+            rest.emplace_back(operation, std::move(next));
         }
-        return summand;
+        return Summand{std::move(first), std::move(rest)};
     }
 
     ParsingExpected<Primary> parsePrimary() { // NOLINT(*complexity)

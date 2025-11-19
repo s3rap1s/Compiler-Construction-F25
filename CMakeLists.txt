@@ -28,6 +28,7 @@ add_executable(main
     parser/tree_printer.cpp
 
     analyzer/analyzer.cpp
+    analyzer/symbol_table.cpp
 
     main.cpp
 )

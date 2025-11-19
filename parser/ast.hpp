@@ -89,6 +89,9 @@ struct Summand {
 
     Primary first; // same as Factor
     std::vector<std::pair<Operation, Primary>> rest;
+
+    // A constructor's declaration keeps the Clangd (but not Clang++) problem away
+    inline Summand(Primary first, std::vector<std::pair<Operation, Primary>> rest);
 };
 
 struct NumberExpression {
@@ -261,6 +264,9 @@ struct Program {
  * =========================
  */
 NumberExpression::NumberExpression(Summand first, std::vector<std::pair<Operation, Summand>> rest)
+    : first{std::move(first)}, rest{std::move(rest)} {}
+
+Summand::Summand(Primary first, std::vector<std::pair<Operation, Primary>> rest)
     : first{std::move(first)}, rest{std::move(rest)} {}
 
 /* ===============
