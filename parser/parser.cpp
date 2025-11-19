@@ -277,7 +277,7 @@ class Parser {
         return RoutineDeclaration{.name = {.span = id.span, .text = std::move(id.payload).name},
                                   .parameters = std::move(params),
                                   .body = std::move(body),
-                                  .return_type = std::move(return_type)};
+                                  .return_type{std::move(return_type)}};
     }
 
     ParsingExpected<Type> parseType() {

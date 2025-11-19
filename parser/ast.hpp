@@ -279,19 +279,25 @@ struct VariableDeclaration {
 struct ParameterDeclaration {
     Identifier name;
     Type type;
+    TypeId resolved_type = -1;
 };
 
 struct RoutineDeclaration {
+    struct ReturnType {
+        Type type;
+        TypeId resolved = -1;
+    };
+
     Identifier name;
     std::vector<ParameterDeclaration> parameters;
     std::optional<std::variant<Block, Expression>> body;
-    std::optional<Type> return_type;
-    TypeId resolved_return_type = -1;
+    std::optional<ReturnType> return_type;
 };
 
 struct TypeDeclaration {
     Identifier name;
     Type type;
+    TypeId resolved_type = -1;
 };
 
 struct Program {
