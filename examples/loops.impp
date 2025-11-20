@@ -1,6 +1,6 @@
 routine sum(arr : array[] integer) : integer
 
-routine main() is
+routine main() : integer is
     var arr : array[3] integer
     arr[1] := 10
     arr[2] := 20
@@ -18,10 +18,9 @@ routine main() is
     end
 end
 
-routine sum(arr : array[] integer) is
+routine sum(arr : array[] integer) : integer is
     var sum is 0
     for elem in arr loop
         sum := sum + elem
     end
-    return sum
 end  
