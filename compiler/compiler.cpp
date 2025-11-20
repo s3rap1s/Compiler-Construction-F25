@@ -458,7 +458,7 @@ struct Compiler {
             args.push_back(generateExpression(arg));
         }
 
-        return builder->CreateCall(function, args, "calltmp");
+        return builder->CreateCall(function, args, !args.empty() ? "calltmp" : "");
     }
 
     void generateAssignment(const AssignmentStatement& assignment) {
