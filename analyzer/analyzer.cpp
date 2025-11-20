@@ -248,7 +248,7 @@ class SemanticAnalyzer {
                                   if (array.size)
                                       checkExpression(*array.size);
                                   // TODO: compute size
-                                  array.computed_size = 1;
+                                  array.computed_size = 100; // NOLINT
                               },
                               [this](RecordType& record) {
                                   for (VariableDeclaration& field : record.fields) {
