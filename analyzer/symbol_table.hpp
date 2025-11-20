@@ -28,6 +28,7 @@ struct RoutineInfo {
     std::vector<TypeId> parameters;
     std::optional<TypeId> return_type;
     Span span_of_declaration;
+    bool last_return;
     bool defined;
     bool used = false;
 };

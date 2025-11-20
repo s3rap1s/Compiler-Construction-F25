@@ -3,6 +3,7 @@
 #include "analyzer/semantic_error.hpp"
 #include "analyzer/symbol_table.hpp"
 #include "parser/ast.hpp"
+#include "parser/syntax_error.hpp"
 #include "utils.hpp"
 
 #include <algorithm>
@@ -421,14 +422,14 @@ class SemanticAnalyzer {
         table.popScope(for_stmt.body);
     }
 
-    void checkRoutineDeclaration(RoutineDeclaration& routine) {
+    bool checkRoutineDeclaration(RoutineDeclaration& routine) {
         for (ParameterDeclaration& param : routine.parameters)
             param.resolved_type = checkType(param.type);
         if (routine.return_type)
             routine.return_type->resolved = checkType(routine.return_type->type);
 
         if (!routine.body)
-            return;
+            return false;
 
         if (auto* expr = std::get_if<Expression>(&*routine.body)) {
             if (!routine.return_type)
@@ -453,7 +454,17 @@ class SemanticAnalyzer {
         for (const ParameterDeclaration& param : routine.parameters)
             table.addLocalVariable(param.name, param.resolved_type);
         checkBlock(body);
+
+        bool last_return = false;
+        if (!body.empty()) {
+            if (auto* last_statement = std::get_if<Statement>(&body.back()))
+                last_return = std::holds_alternative<ReturnStatement>(*last_statement);
+        }
+        if (routine.return_type && !last_return)
+            throw SemanticError{"Non-void function must have return as the last statement", routine.name.span};
+
         table.popScope(body);
+        return last_return;
     }
 
     void optimizeRoutine(RoutineDeclaration& routine) {
@@ -527,13 +538,14 @@ class SemanticAnalyzer {
                                        it->second.defined = true;
                                    checkRoutineDeclaration(routine);
                                } else {
-                                   checkRoutineDeclaration(routine);
+                                   bool last_return = checkRoutineDeclaration(routine);
                                    bool is_defined = routine.body.has_value();
                                    const auto& return_type = routine.return_type;
                                    RoutineInfo info{.parameters = {},
                                                     .return_type = return_type ? std::optional{return_type->resolved}
                                                                                : std::nullopt,
                                                     .span_of_declaration = routine.name.span,
+                                                    .last_return = last_return,
                                                     .defined = is_defined};
                                    for (const ParameterDeclaration& param : routine.parameters)
                                        info.parameters.push_back(param.resolved_type);

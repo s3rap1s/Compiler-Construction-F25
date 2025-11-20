@@ -1,3 +1,8 @@
-routine main() : integer is
+routine hw() is
     print "Hello, World!", 123
+end
+
+routine main() : integer is
+    hw
+    return 0
 end
