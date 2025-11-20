@@ -13,7 +13,7 @@ routine main() is
         print arr[i]
     end
 
-    for i in 5..1 loop
+    for i in arr loop
         print i
     end
 end

@@ -64,11 +64,22 @@ std::string representListOfKeywords(std::span<const SyntaxPart> sps) {
     return sps | transform(representSyntaxPart) | join_with(", "sv) | std::ranges::to<std::string>();
 }
 
-void handleSyntaxError(const SyntaxError& error, std::string_view filename, std::string_view program) {
+void printErrorHeader(std::string_view filename, const Span& error_location) {
+    logError("{}:{}:{}: error: ", filename, error_location.line_no, error_location.column_no);
+}
+
+void printErrorSpan(std::string_view program, const Span& error_location) {
     using namespace std::views;
 
-    const Span& error_location = error.span;
-    logError("{}:{}:{}: error: ", filename, error_location.line_no, error_location.column_no);
+    const std::size_t line_start = error_location.begin - (error_location.column_no - 1);
+    const std::size_t error_length = error_location.end - error_location.begin;
+    logErrorLn("    | {:s}",
+               program.substr(line_start) | take_while([](char ch) static { return ch != '\n' && ch != '\r'; }));
+    logErrorLn("    | {:s}^{:s}", repeat(' ', error_location.column_no - 1), repeat('~', error_length - 1));
+}
+
+void handleSyntaxError(const SyntaxError& error, std::string_view filename, std::string_view program) {
+    printErrorHeader(filename, error.span);
     std::visit(
         overloaded{
             [](const LexingError& e) { handleLexingError(e); },
@@ -90,12 +101,13 @@ void handleSyntaxError(const SyntaxError& error, std::string_view filename, std:
             },
         },
         error.payload);
+    printErrorSpan(program, error.span);
+}
 
-    const std::size_t line_start = error_location.begin - (error_location.column_no - 1);
-    const std::size_t error_length = error_location.end - error_location.begin;
-    logErrorLn("    | {:s}",
-               program.substr(line_start) | take_while([](char ch) static { return ch != '\n' && ch != '\r'; }));
-    logErrorLn("    | {:s}^{:s}", repeat(' ', error_location.column_no - 1), repeat('~', error_length - 1));
+void handleSemanticError(const SemanticError& error, std::string_view filename, std::string_view program) {
+    printErrorHeader(filename, error.span);
+    logErrorLn("{}", error.what);
+    printErrorSpan(program, error.span);
 }
 
 } // namespace
@@ -127,8 +139,7 @@ int main(int argc, const char** argv) {
     std::optional<SemanticError> semantic_error = analyze(*ast, entry_point);
     if (semantic_error) {
         program_text = std::move(lexer).getProgramText();
-        std::cout << semantic_error->what;
-        // handleSemanticError(analysis_result.error(), filename, program_text);
+        handleSemanticError(*semantic_error, filename, program_text);
         return EXIT_FAILURE;
     }
     print_tree(*ast);
