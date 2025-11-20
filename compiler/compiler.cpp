@@ -698,6 +698,8 @@ struct Compiler {
                 const auto& str = std::get<parser::StringLiteral>(arg);
                 Value* formatStr = builder->CreateGlobalString(str.value);
                 builder->CreateCall(printfFunc, {formatStr});
+                formatStr = builder->CreateGlobalString(" ");
+                builder->CreateCall(printfFunc, {formatStr});
             } else {
                 const auto& expr = std::get<Expression>(arg);
                 Value* value = generateExpression(expr);
