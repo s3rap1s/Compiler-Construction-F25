@@ -54,7 +54,7 @@ class SemanticAnalyzer {
             }
             last_type = table.BooleanTypeId;
         }
-        return last_type;
+        return expr.type = last_type;
     }
 
     TypeId checkBooleanExpression(BooleanExpression& bool_expr) {
@@ -66,7 +66,7 @@ class SemanticAnalyzer {
     TypeId checkRelation(Relation& relation) {
         TypeId first = checkNumberExpression(relation.first);
         if (!relation.second)
-            return first;
+            return relation.type = first;
         TypeId second = checkNumberExpression(relation.second->next_operand);
         if (!areForNumericOperation(first, second)) {
             const TypeInfo& info1 = table.getTypeInfo(first);
@@ -74,12 +74,12 @@ class SemanticAnalyzer {
             throw SemanticError{"Invalid types '" + info1.name + "' and '" + info2.name + "' for numeric operation",
                                 getSpan(relation)};
         }
-        return table.BooleanTypeId;
+        return relation.type = table.BooleanTypeId;
     }
 
     TypeId checkNotExpression(NotExpression& not_expr) {
         TypeId type = checkPrimary(not_expr.operand);
-        if (type != table.IntegerTypeId || type != table.BooleanTypeId) {
+        if (type != table.IntegerTypeId && type != table.BooleanTypeId) {
             throw SemanticError{"Invalid operand type '" + table.getTypeInfo(type).name + "' for numeric operation",
                                 not_expr.not_span};
         }
@@ -102,7 +102,7 @@ class SemanticAnalyzer {
                 operation_type = table.IntegerTypeId;
             last_type = operand_type;
         }
-        return last_type;
+        return num_expr.type = last_type;
     }
 
     TypeId checkSummand(Summand& summand) {
@@ -122,7 +122,7 @@ class SemanticAnalyzer {
                 operation_type = table.IntegerTypeId;
             last_type = operand_type;
         }
-        return last_type;
+        return summand.type = last_type;
     }
 
     TypeId checkPrimary(Primary& primary) {
