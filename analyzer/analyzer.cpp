@@ -178,7 +178,13 @@ class SemanticAnalyzer {
             throw SemanticError{"Cannot access field '" + field_name.text + "' on non-record type", field_name.span};
 
         const auto& record_info = std::get<RecordTypeInfo>(type_info_of_last.definition);
-        auto it = record_info.fields.find(field_name.text);
+        auto it = record_info.fields.begin();
+        while (it != record_info.fields.end()) {
+            if (it->first == field_name.text) {
+                break;
+            }
+            ++it;
+        }
         if (it != record_info.fields.end())
             return accessor_type = it->second;
         throw SemanticError{"Type " + type_info_of_last.name + " has no field named '" + field_name.text + "'",
@@ -544,7 +550,7 @@ class SemanticAnalyzer {
 
   public:
     explicit SemanticAnalyzer(Program& program, std::string_view entry_point)
-        : program{program}, entry_point{entry_point}, table{} {}
+        : program{program}, entry_point{entry_point} {}
 
     std::optional<SemanticError> analyze() {
         try {

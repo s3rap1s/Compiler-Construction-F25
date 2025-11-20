@@ -51,7 +51,7 @@ struct RealTypeInfo {};
 struct BooleanTypeInfo {};
 
 struct RecordTypeInfo {
-    std::unordered_map<std::string, TypeId> fields;
+    std::vector<std::pair<std::string, TypeId>> fields;
 };
 
 struct ArrayTypeInfo {

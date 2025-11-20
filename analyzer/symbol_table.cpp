@@ -161,7 +161,7 @@ RecordTypeInfo SymbolTable::createRecordTypeInfo(const parser::RecordType& type)
     RecordTypeInfo info{};
     for (const VariableDeclaration& var_decl : type.fields) {
         assert(var_decl.resolved_type != static_cast<std::size_t>(-1) && "Variable's type was not resolved");
-        info.fields.emplace(var_decl.name.text, var_decl.resolved_type);
+        info.fields.emplace_back(var_decl.name.text, var_decl.resolved_type);
     }
     return info;
 }
