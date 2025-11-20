@@ -115,6 +115,12 @@ void handleSemanticError(const SemanticError& error, std::string_view filename, 
     printErrorSpan(program, error.span);
 }
 
+void handleCompileError(const CompileError& error, std::string_view filename, std::string_view program) {
+    printErrorHeader(filename, error.span);
+    logErrorLn("{}", error.what);
+    printErrorSpan(program, error.span);
+}
+
 void saveLLVMIRToFile(llvm::Module& module, const std::string& filename) {
     std::error_code ec;
     llvm::raw_fd_ostream out(filename, ec);
@@ -147,23 +153,25 @@ int main(int argc, const char** argv) {
 
     Lexer lexer{std::move(program_text)};
     std::expected<Program, SyntaxError> ast = parse(lexer);
+    program_text = std::move(lexer).getProgramText();
     if (!ast) {
-        program_text = std::move(lexer).getProgramText();
         handleSyntaxError(ast.error(), filename, program_text);
         return EXIT_FAILURE;
     }
 
     std::expected<SymbolTable, SemanticError> symbol_table = analyze(*ast, entry_point);
     if (!symbol_table) {
-        program_text = std::move(lexer).getProgramText();
         handleSemanticError(symbol_table.error(), filename, program_text);
         return EXIT_FAILURE;
     }
     // print_tree(*ast);
+
     std::expected<std::unique_ptr<llvm::Module>, CompileError> compile_res = compile(*ast, *symbol_table);
     if (!compile_res) {
+        handleCompileError(compile_res.error(), filename, program_text);
         return EXIT_FAILURE;
     }
+
     auto module = std::move(*compile_res);
     saveLLVMIRToFile(*module, "output.ll");
     return EXIT_SUCCESS;
