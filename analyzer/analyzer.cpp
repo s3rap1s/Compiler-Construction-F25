@@ -5,11 +5,8 @@
 #include "parser/ast.hpp"
 #include "utils.hpp"
 
-<<<<<<< HEAD
 #include <algorithm>
-=======
 #include <expected>
->>>>>>> 1869f40 (wip)
 #include <format>
 #include <memory>
 #include <optional>
