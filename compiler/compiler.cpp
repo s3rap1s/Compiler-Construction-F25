@@ -5,6 +5,7 @@
 #include "parser/ast.hpp"
 
 #include <cassert>
+#include <climits>
 #include <iostream>
 #include <llvm/IR/Constant.h>
 #include <llvm/IR/Constants.h>
@@ -839,7 +840,7 @@ struct Compiler {
         for (const auto& arg : printStmt.arguments) {
             if (std::holds_alternative<parser::StringLiteral>(arg)) {
                 const auto& str = std::get<parser::StringLiteral>(arg);
-                Value* formatStr = builder->CreateGlobalStringPtr(str.value);
+                Value* formatStr = builder->CreateGlobalString(str.value);
                 builder->CreateCall(printfFunc, {formatStr});
             } else {
                 const auto& expr = std::get<Expression>(arg);
@@ -847,23 +848,28 @@ struct Compiler {
 
                 // Create format string based on type
                 Value* formatStr = nullptr;
-                if (value->getType()->isIntegerTy(32)) {
-                    formatStr = builder->CreateGlobalStringPtr("%d\n");
+                if (value->getType()->isIntegerTy(CHAR_BIT * sizeof(int))) {
+                    formatStr = builder->CreateGlobalString("%d ");
                 } else if (value->getType()->isDoubleTy()) {
-                    formatStr = builder->CreateGlobalStringPtr("%f\n");
+                    formatStr = builder->CreateGlobalString("%f ");
                 } else if (value->getType()->isIntegerTy(1)) {
-                    formatStr = builder->CreateGlobalStringPtr("%s\n");
+                    formatStr = builder->CreateGlobalString("%s ");
                     // Convert boolean to string
-                    Value* trueStr = builder->CreateGlobalStringPtr("true");
-                    Value* falseStr = builder->CreateGlobalStringPtr("false");
+                    Value* trueStr = builder->CreateGlobalString("true ");
+                    Value* falseStr = builder->CreateGlobalString("false ");
                     value = builder->CreateSelect(value, trueStr, falseStr);
                 }
 
                 if (formatStr) {
                     builder->CreateCall(printfFunc, {formatStr, value});
+                } else {
+                    const auto& expr = std::get<Expression>(arg);
+                    throw CompileError{"Cannot print type '" + symbolTable.getTypeInfo(expr.type).name + "'",
+                                       getSpan(expr)};
                 }
             }
         }
+        builder->CreateCall(printfFunc, {builder->CreateGlobalString("\n")});
     }
 
     void generateReturnStatement(const ReturnStatement& retStmt) {
