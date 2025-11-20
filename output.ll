@@ -4,8 +4,6 @@ source_filename = "Module"
 @0 = private unnamed_addr constant [4 x i8] c"%d\0A\00", align 1
 @1 = private unnamed_addr constant [4 x i8] c"%d\0A\00", align 1
 
-declare i32 @sum([100 x i32])
-
 define i32 @main() {
 entry:
   %i9 = alloca i32, align 4
@@ -52,7 +50,7 @@ for.body7:                                        ; preds = %for.cond6
   %loadtmp12 = load i32, ptr %i9, align 4
   %arrayidx13 = getelementptr [100 x i32], ptr %arr, i32 0, i32 %loadtmp12
   %loadtmp14 = load i32, ptr %arrayidx13, align 4
-  %1 = call i32 (ptr, ...) @printf.2(ptr @1, i32 %loadtmp14)
+  %1 = call i32 (ptr, ...) @printf.1(ptr @1, i32 %loadtmp14)
   %nextval15 = sub i32 %loopvar10, 1
   store i32 %nextval15, ptr %i9, align 4
   br label %for.cond6
@@ -61,7 +59,7 @@ for.end8:                                         ; preds = %for.cond6
   ret i32 0
 }
 
-define i32 @sum.1([100 x i32] %arr) {
+define i32 @sum([100 x i32] %arr) {
 entry:
   %index = alloca i32, align 4
   %elem = alloca i32, align 4
@@ -95,4 +93,4 @@ for.end:                                          ; preds = %for.cond
 
 declare i32 @printf(ptr, ...)
 
-declare i32 @printf.2(ptr, ...)
+declare i32 @printf.1(ptr, ...)

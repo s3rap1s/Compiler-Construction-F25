@@ -127,6 +127,7 @@ struct SymbolTable {
     }
 
     std::unordered_map<std::string, RoutineInfo>& getRoutines();
+    const std::unordered_map<std::string, RoutineInfo>& getRoutines() const;
     std::unordered_map<const Block*, Scope>& getScopes();
     std::unordered_set<std::string>& getForLoopVariables();
 

@@ -973,7 +973,10 @@ struct Compiler {
             if (std::holds_alternative<VariableDeclaration>(declaration)) {
                 generateGlobalVariableDeclaration(std::get<VariableDeclaration>(declaration));
             } else if (std::holds_alternative<RoutineDeclaration>(declaration)) {
-                Function* func = generateRoutineDeclaration(std::get<RoutineDeclaration>(declaration));
+                const auto& routine = std::get<RoutineDeclaration>(declaration);
+                if (!routine.body)
+                    continue;
+                Function* func = generateRoutineDeclaration(routine);
                 functions[std::get<RoutineDeclaration>(declaration).name.text] = func;
             }
         }

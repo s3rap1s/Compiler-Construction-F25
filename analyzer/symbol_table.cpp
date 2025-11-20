@@ -22,6 +22,10 @@ std::unordered_map<std::string, RoutineInfo>& SymbolTable::getRoutines() {
     return routines;
 }
 
+const std::unordered_map<std::string, RoutineInfo>& SymbolTable::getRoutines() const {
+    return routines;
+}
+
 std::unordered_map<const Block*, Scope>& SymbolTable::getScopes() {
     return scopes;
 }
