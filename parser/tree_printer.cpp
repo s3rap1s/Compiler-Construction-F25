@@ -388,8 +388,8 @@ class TreePrinter {
 
     // Statements and Block
     void print(const parser::Block& block) {
-        for (const auto& element : block) {
-            std::visit([this](const auto& elem) { this->printDeduced(elem); }, element);
+        for (const parser::Statement& element : block) {
+            print(element);
             newline();
         }
     }
@@ -532,11 +532,6 @@ class TreePrinter {
 
     void print(const parser::StringLiteral& str_lit) {
         out << "StringLiteral(\"" << str_lit.value << "\")";
-    }
-
-    void print(const parser::NoopStatement& /*unused*/) {
-        print_indent();
-        out << "Noop";
     }
 
   private:

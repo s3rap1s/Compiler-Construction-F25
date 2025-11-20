@@ -477,14 +477,18 @@ struct Compiler {
     void generateTypeDeclaration(const TypeDeclaration& declaration) {}
 
     void generateStatement(const Statement& stmt) {
-        std::visit(overloaded{[this](const AssignmentStatement& assignment) { generateAssignment(assignment); },
-                              [this](const RoutineCall& call) { generateRoutineCall(call); },
-                              [this](const WhileStatement& whileStmt) { generateWhileLoop(whileStmt); },
-                              [this](const ForStatement& forStmt) { generateForLoop(forStmt); },
-                              [this](const IfStatement& ifStmt) { generateIfStatement(ifStmt); },
-                              [this](const PrintStatement& printStmt) { generatePrintStatement(printStmt); },
-                              [this](const ReturnStatement& retStmt) { generateReturnStatement(retStmt); },
-                              [](const NoopStatement&) { /* Do nothing */ }},
+        std::visit(overloaded{
+                       [this](const VariableDeclaration& var) { generateLocalVariableDeclaration(var); },
+                       [this](const TypeDeclaration& type) { generateTypeDeclaration(type); },
+
+                       [this](const AssignmentStatement& assignment) { generateAssignment(assignment); },
+                       [this](const RoutineCall& call) { generateRoutineCall(call); },
+                       [this](const WhileStatement& whileStmt) { generateWhileLoop(whileStmt); },
+                       [this](const ForStatement& forStmt) { generateForLoop(forStmt); },
+                       [this](const IfStatement& ifStmt) { generateIfStatement(ifStmt); },
+                       [this](const PrintStatement& printStmt) { generatePrintStatement(printStmt); },
+                       [this](const ReturnStatement& retStmt) { generateReturnStatement(retStmt); },
+                   },
                    stmt);
     }
 
@@ -738,11 +742,8 @@ struct Compiler {
     }
 
     void generateBlock(const Block& block) {
-        for (const auto& element : block) {
-            std::visit(overloaded{[this](const VariableDeclaration& var) { generateLocalVariableDeclaration(var); },
-                                  [this](const TypeDeclaration& type) { generateTypeDeclaration(type); },
-                                  [this](const Statement& stmt) { generateStatement(stmt); }},
-                       element);
+        for (const Statement& element : block) {
+            generateStatement(element);
         }
     }
 
@@ -786,7 +787,8 @@ struct Compiler {
             if (std::holds_alternative<Block>(*declaration.body)) {
                 generateBlock(std::get<Block>(*declaration.body));
                 // return for void functions can be ommited
-                if (!symbolTable.getRoutines().find(declaration.name.text)->second.last_return && !declaration.return_type)
+                if (!symbolTable.getRoutines().find(declaration.name.text)->second.last_return &&
+                    !declaration.return_type)
                     builder->CreateRetVoid();
             } else {
                 Value* result = generateExpression(std::get<Expression>(*declaration.body));

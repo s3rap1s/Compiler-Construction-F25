@@ -4,7 +4,6 @@
 #include <format>
 #include <fstream>
 #include <iostream>
-#include <optional>
 #include <print>
 #include <ranges>
 #include <span>
@@ -25,7 +24,6 @@
 #include "parser/ast.hpp"
 #include "parser/parser.hpp"
 #include "parser/syntax_error.hpp"
-#include "parser/tree_printer.hpp"
 
 #include "utils.hpp"
 

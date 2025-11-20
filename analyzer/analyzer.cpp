@@ -3,7 +3,6 @@
 #include "analyzer/semantic_error.hpp"
 #include "analyzer/symbol_table.hpp"
 #include "parser/ast.hpp"
-#include "parser/syntax_error.hpp"
 #include "utils.hpp"
 
 #include <algorithm>
@@ -14,7 +13,6 @@
 #include <ranges>
 #include <string>
 #include <string_view>
-#include <type_traits>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
@@ -263,107 +261,49 @@ class SemanticAnalyzer {
 
     void checkBlock(Block& block) {
         table.pushScope(block);
-        for (auto& element : block) {
-            std::visit(overloaded{[&](VariableDeclaration& var) {
-                                      checkVariableDeclaration(var);
-                                      table.addLocalVariable(var.name, var.resolved_type);
-                                  },
-                                  [&](TypeDeclaration& type) {
-                                      TypeId type_id = checkType(type.type);
-                                      table.addLocalTypeDeclaration(type.name, type_id);
-                                  },
-                                  [&](Statement& stmt) { checkStatement(stmt); }},
-                       element);
-        }
+        for (Statement& element : block)
+            checkStatement(element);
         table.popScope(block);
     }
 
-    void optimizeBlock(Block& block) { // NOLINT(*complexity*)
-        auto block_usage_it = table.getScopes().find(&block);
-        if (block_usage_it == table.getScopes().end())
-            return;
-
-        const std::unordered_map<std::string, VarInfo>& variable_usage = block_usage_it->second.variables;
-        const std::unordered_map<std::string, TypeId>& type_usage = block_usage_it->second.types;
-
-        Block optimized;
-        for (bool found_return = false; auto& element : block) {
-            if (found_return)
-                break;
-            std::visit(overloaded{
-                           [&](VariableDeclaration& var) {
-                               if ((variable_usage.contains(var.name.text) && variable_usage.at(var.name.text).used) ||
-                                   var.value) {
-                                   optimized.emplace_back(std::move(var));
-                               }
-                           },
-                           [&](TypeDeclaration& type) {
-                               if (type_usage.contains(type.name.text) &&
-                                   table.getTypeInfo(type_usage.at(type.name.text)).used) {
-                                   optimized.emplace_back(std::move(type));
-                               }
-                           },
-                           [&](Statement& statement) {
-                               optimizeStatement(statement);
-                               if (std::holds_alternative<ReturnStatement>(statement))
-                                   found_return = true;
-                               optimized.emplace_back(std::move(statement));
-                           },
-                       },
-                       element);
-        }
-        block = std::move(optimized);
-    }
-
     void checkStatement(Statement& stmt) {
-        std::visit(
-            [this](auto& statement) {
-                using T = std::decay_t<decltype(statement)>;
-
-                if constexpr (std::is_same_v<T, AssignmentStatement>) {
-                    checkAssignment(statement);
-                } else if constexpr (std::is_same_v<T, WhileStatement>) {
-                    checkExpression(statement.condition);
-                    checkBlock(statement.body);
-                } else if constexpr (std::is_same_v<T, ForStatement>) {
-                    checkForStatement(statement);
-                } else if constexpr (std::is_same_v<T, IfStatement>) {
-                    checkExpression(statement.condition);
-                    checkBlock(statement.true_branch);
-                    if (statement.false_branch) {
-                        checkBlock(*statement.false_branch);
-                    }
-                } else if constexpr (std::is_same_v<T, PrintStatement>) {
-                    for (auto& arg : statement.arguments) {
-                        if (std::holds_alternative<Expression>(arg)) {
-                            checkExpression(std::get<Expression>(arg));
-                        }
-                    }
-                } else if constexpr (std::is_same_v<T, ReturnStatement>) {
-                    if (statement.value) {
-                        checkExpression(*statement.value);
-                    }
-                } else if constexpr (std::is_same_v<T, RoutineCall>) {
-                    checkRoutineCall(statement);
-                }
-            },
-            stmt);
-    }
-
-    void optimizeStatement(Statement& stmt) {
-        std::visit(
-            [&](auto& statement) {
-                using T = std::decay_t<decltype(statement)>;
-
-                if constexpr (std::is_same_v<T, WhileStatement> || std::is_same_v<T, ForStatement>) {
-                    optimizeBlock(statement.body);
-                } else if constexpr (std::is_same_v<T, IfStatement>) {
-                    optimizeBlock(statement.true_branch);
-                    if (statement.false_branch)
-                        optimizeBlock(*statement.false_branch);
-                }
-            },
-            stmt);
+        std::visit(overloaded{
+                       [&](VariableDeclaration& var) {
+                           checkVariableDeclaration(var);
+                           table.addLocalVariable(var.name, var.resolved_type);
+                       },
+                       [&](TypeDeclaration& type) {
+                           TypeId type_id = checkType(type.type);
+                           table.addLocalTypeDeclaration(type.name, type_id);
+                       },
+                       [this](AssignmentStatement& statement) { checkAssignment(statement); },
+                       [this](WhileStatement& statement) {
+                           checkExpression(statement.condition);
+                           checkBlock(statement.body);
+                       },
+                       [this](ForStatement& statement) { checkForStatement(statement); },
+                       [this](IfStatement& statement) {
+                           checkExpression(statement.condition);
+                           checkBlock(statement.true_branch);
+                           if (statement.false_branch) {
+                               checkBlock(*statement.false_branch);
+                           }
+                       },
+                       [this](PrintStatement& statement) {
+                           for (auto& arg : statement.arguments) {
+                               if (std::holds_alternative<Expression>(arg)) {
+                                   checkExpression(std::get<Expression>(arg));
+                               }
+                           }
+                       },
+                       [this](ReturnStatement& statement) {
+                           if (statement.value) {
+                               checkExpression(*statement.value);
+                           }
+                       },
+                       [this](RoutineCall& statement) { checkRoutineCall(statement); },
+                   },
+                   stmt);
     }
 
     void checkAssignment(AssignmentStatement& assignment) {
@@ -456,24 +396,13 @@ class SemanticAnalyzer {
         checkBlock(body);
 
         bool last_return = false;
-        if (!body.empty()) {
-            if (auto* last_statement = std::get_if<Statement>(&body.back()))
-                last_return = std::holds_alternative<ReturnStatement>(*last_statement);
-        }
+        if (!body.empty())
+            last_return = std::holds_alternative<ReturnStatement>(body.back());
         if (routine.return_type && !last_return)
             throw SemanticError{"Non-void function must have return as the last statement", routine.name.span};
 
         table.popScope(body);
         return last_return;
-    }
-
-    void optimizeRoutine(RoutineDeclaration& routine) {
-        if (!routine.body)
-            return;
-
-        if (std::holds_alternative<Block>(*routine.body)) {
-            optimizeBlock(std::get<Block>(*routine.body));
-        }
     }
 
     void checkForwardDeclarations() {
@@ -482,6 +411,48 @@ class SemanticAnalyzer {
                 throw SemanticError{"Forward declared routine \"" + name + "\" is never defined",
                                     routine_info.span_of_declaration};
             }
+        }
+    }
+
+    bool optimizeBlock(Block& block) {
+        auto block_usage_it = table.getScopes().find(&block);
+        Block optimized;
+        for (bool found_return = false; Statement& statement : block) {
+            if (found_return)
+                break;
+            // optimize out?
+            if (!optimizeStatement(statement, block_usage_it->second))
+                optimized.emplace_back(std::move(statement));
+            if (std::holds_alternative<ReturnStatement>(statement))
+                found_return = true;
+        }
+        block = std::move(optimized);
+        return block.empty();
+    }
+
+    bool optimizeStatement(Statement& statement, const Scope& scope) {
+        return std::visit(
+            overloaded{
+                [&](VariableDeclaration& var) { return !scope.variables.at(var.name.text).used && !var.value; },
+                [&](TypeDeclaration& type) { return !table.getTypeInfo(scope.types.at(type.name.text)).used; },
+                [this](WhileStatement& while_loop) { return optimizeBlock(while_loop.body); },
+                [this](ForStatement& for_loop) { return optimizeBlock(for_loop.body); },
+                [this](IfStatement& if_stmt) {
+                    if (!if_stmt.false_branch)
+                        return optimizeBlock(if_stmt.true_branch);
+                    return optimizeBlock(if_stmt.true_branch) && optimizeBlock(*if_stmt.false_branch);
+                },
+                [](auto& /*statement*/) { return false; },
+            },
+            statement);
+    }
+
+    void optimizeRoutine(RoutineDeclaration& routine) {
+        if (!routine.body)
+            return;
+
+        if (std::holds_alternative<Block>(*routine.body)) {
+            optimizeBlock(std::get<Block>(*routine.body));
         }
     }
 

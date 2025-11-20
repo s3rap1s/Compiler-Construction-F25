@@ -225,7 +225,8 @@ struct ForStatement;
 struct IfStatement;
 struct PrintStatement;
 struct ReturnStatement;
-struct NoopStatement {};
+struct VariableDeclaration;
+struct TypeDeclaration;
 using Statement = std::variant<AssignmentStatement,
                                RoutineCall,
                                WhileStatement,
@@ -233,12 +234,10 @@ using Statement = std::variant<AssignmentStatement,
                                IfStatement,
                                PrintStatement,
                                ReturnStatement,
-                               NoopStatement>;
+                               VariableDeclaration,
+                               TypeDeclaration>;
 
-struct VariableDeclaration;
-struct TypeDeclaration;
-using Block = std::vector<std::variant<VariableDeclaration, TypeDeclaration, Statement>>;
-// Why declarations are not considered statements?
+using Block = std::vector<Statement>;
 
 struct AssignmentStatement {
     ModifiablePrimary target;
