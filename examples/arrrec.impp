@@ -9,7 +9,7 @@ type Container is record
     var points: Points
 end
 
-routine main() is
+routine main() : integer is
     var c: Container
     c.points[1].x := 1
     c.points[1].y := 2

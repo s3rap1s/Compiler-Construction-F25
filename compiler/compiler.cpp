@@ -923,31 +923,14 @@ struct Compiler {
             namedValues[std::string(arg.getName())] = alloca;
         }
 
-        // Generate function body
         if (declaration.body) {
             if (std::holds_alternative<Block>(*declaration.body)) {
                 generateBlock(std::get<Block>(*declaration.body));
-
-                // Если функция должна возвращать значение, но нет return statement
-                if (!function->getReturnType()->isVoidTy()) {
-                    // Добавляем возврат значения по умолчанию
-                    if (function->getReturnType()->isIntegerTy(32)) {
-                        builder->CreateRet(ConstantInt::get(builder->getInt32Ty(), 0));
-                    } else if (function->getReturnType()->isDoubleTy()) {
-                        builder->CreateRet(ConstantFP::get(builder->getDoubleTy(), 0.0));
-                    } else if (function->getReturnType()->isIntegerTy(1)) {
-                        builder->CreateRet(ConstantInt::get(builder->getInt1Ty(), 0));
-                    } else {
-                        builder->CreateRetVoid();
-                    }
-                }
             } else {
-                // Handle expression body (arrow functions)
                 Value* result = generateExpression(std::get<Expression>(*declaration.body));
                 builder->CreateRet(result);
             }
         } else {
-            // Для функций без тела - возврат по умолчанию
             if (!function->getReturnType()->isVoidTy()) {
                 builder->CreateRet(Constant::getNullValue(function->getReturnType()));
             } else {
