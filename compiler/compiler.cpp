@@ -41,6 +41,10 @@ struct Compiler {
     std::unique_ptr<llvm::IRBuilder<>> builder = std::make_unique<IRBuilder<>>(*context);
     std::unique_ptr<llvm::Module> module = std::make_unique<Module>("Module", *context);
 
+    // Declare printf function
+    FunctionType* printfType = FunctionType::get(builder->getInt32Ty(), {builder->getInt8Ty()->getPointerTo()}, true);
+    Function* printfFunc = Function::Create(printfType, Function::ExternalLinkage, "printf", module.get());
+
     std::unordered_map<std::string, Value*> namedValues;
     std::unordered_map<std::string, Function*> functions;
 
@@ -832,11 +836,6 @@ struct Compiler {
     }
 
     void generatePrintStatement(const PrintStatement& printStmt) {
-        // Declare printf function
-        FunctionType* printfType =
-            FunctionType::get(builder->getInt32Ty(), {builder->getInt8Ty()->getPointerTo()}, true);
-        Function* printfFunc = Function::Create(printfType, Function::ExternalLinkage, "printf", module.get());
-
         for (const auto& arg : printStmt.arguments) {
             if (std::holds_alternative<parser::StringLiteral>(arg)) {
                 const auto& str = std::get<parser::StringLiteral>(arg);
