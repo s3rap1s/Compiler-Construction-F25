@@ -5,6 +5,7 @@
 #include "parser/ast.hpp"
 #include "utils.hpp"
 
+#include <algorithm>
 #include <format>
 #include <memory>
 #include <optional>
@@ -178,13 +179,8 @@ class SemanticAnalyzer {
             throw SemanticError{"Cannot access field '" + field_name.text + "' on non-record type", field_name.span};
 
         const auto& record_info = std::get<RecordTypeInfo>(type_info_of_last.definition);
-        auto it = record_info.fields.begin();
-        while (it != record_info.fields.end()) {
-            if (it->first == field_name.text) {
-                break;
-            }
-            ++it;
-        }
+        auto it =
+            std::ranges::find(record_info.fields, field_name.text, &decltype(record_info.fields)::value_type::first);
         if (it != record_info.fields.end())
             return accessor_type = it->second;
         throw SemanticError{"Type " + type_info_of_last.name + " has no field named '" + field_name.text + "'",
