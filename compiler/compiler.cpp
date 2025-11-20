@@ -4,6 +4,7 @@
 #include "compiler/compile_error.hpp"
 #include "parser/ast.hpp"
 
+#include <iostream>
 #include <llvm/IR/Constant.h>
 #include <llvm/IR/Constants.h>
 #include <llvm/IR/DerivedTypes.h>
@@ -462,7 +463,7 @@ struct Compiler {
         }
 
         auto* globalVariable = new GlobalVariable(
-            *module, llvmType, false, GlobalValue::InternalLinkage, initialValue, declaration.name.text);
+            *module, llvmType, false, GlobalValue::ExternalLinkage, initialValue, declaration.name.text);
         namedValues[declaration.name.text] = globalVariable;
     }
 
@@ -622,7 +623,7 @@ struct Compiler {
         }
         FunctionType* functionType = FunctionType::get(returnType, paramTypes, false);
         Function* function =
-            Function::Create(functionType, Function::InternalLinkage, declaration.name.text, module.get());
+            Function::Create(functionType, Function::ExternalLinkage, declaration.name.text, module.get());
 
         // Set parameter names
         unsigned idx = 0;
@@ -721,10 +722,24 @@ struct Compiler {
   public:
     explicit Compiler(const Program& ast, const SymbolTable& symbolTable) : symbolTable{symbolTable}, program{ast} {}
 
+    void saveLLVMIRToFile(llvm::Module& module, const std::string& filename) {
+        std::error_code ec;
+        llvm::raw_fd_ostream out(filename, ec);
+        if (ec) {
+            std::cerr << std::format("Failed to open {} for writing: {}", filename, ec.message());
+            return;
+        }
+        module.print(out, nullptr);
+        out.close();
+        std::cerr << std::format("LLVM IR saved to {}", filename);
+    }
+
     std::expected<std::unique_ptr<llvm::Module>, CompileError> compile() {
         try {
             generateCode();
-            return std::move(module);
+            saveLLVMIRToFile(*module, "output.ll");
+            return nullptr;
+            // return std::move(module);
         } catch (const CompileError& error) {
             return std::unexpected{error};
         }

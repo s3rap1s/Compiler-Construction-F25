@@ -173,6 +173,6 @@ int main(int argc, const char** argv) {
     }
 
     auto module = std::move(*compile_res);
-    saveLLVMIRToFile(*module, "output.ll");
+    // saveLLVMIRToFile(*module, "output.ll");
     return EXIT_SUCCESS;
 }
