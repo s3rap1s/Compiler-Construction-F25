@@ -22,190 +22,252 @@ namespace analyzer {
 
 using namespace parser;
 
+namespace {
+
+bool areForNumericOperation(TypeId first, TypeId second) {
+    return (first != SymbolTable::IntegerTypeId && first != SymbolTable::RealTypeId) ||
+           (second != SymbolTable::IntegerTypeId && second != SymbolTable::RealTypeId);
+}
+
+} // namespace
+
 class SemanticAnalyzer {
   private:
     Program& program; // NOLINT(*ref*)
     std::string_view entry_point;
     SymbolTable table;
 
-    void checkExpression(const Expression& expr) {
-        checkBooleanExpression(expr.first);
+    TypeId checkExpression(Expression& expr) {
+        TypeId last_type = checkBooleanExpression(expr.first);
+        if (expr.rest.empty())
+            return expr.type = last_type;
 
-        for (const auto& [op, bool_expr] : expr.rest) {
-            checkBooleanExpression(bool_expr);
-        }
-    }
-
-    void checkBooleanExpression(const BooleanExpression& bool_expr) {
-        std::visit(overloaded{
-                       [this](const Relation& relation) {
-                           checkNumberExpression(relation.first);
-                           if (relation.second)
-                               checkNumberExpression(relation.second->second);
-                       },
-                       [this](const NotExpression& notExpr) { checkPrimary(notExpr.operand); },
-                   },
-                   bool_expr);
-    }
-
-    void checkNumberExpression(const NumberExpression& num_expr) {
-        checkSummand(num_expr.first);
-
-        for (const auto& [op, summand] : num_expr.rest) {
-            checkSummand(summand);
-        }
-    }
-
-    void checkSummand(const Summand& summand) {
-        checkPrimary(summand.first);
-
-        for (const auto& [op, primary] : summand.rest) {
-            checkPrimary(primary);
-        }
-    }
-
-    void checkPrimary(const Primary& primary) {
-        std::visit(
-            [this](const auto& prim) {
-                using T = std::decay_t<decltype(prim)>;
-                if constexpr (std::is_same_v<T, RoutineCall>) {
-                    checkRoutineCall(prim);
-                } else if constexpr (std::is_same_v<T, ModifiablePrimary>) {
-                    checkModifiablePrimary(prim);
-                } else if constexpr (std::is_same_v<T, std::unique_ptr<Expression>>) {
-                    checkExpression(*prim);
-                } else if constexpr (std::is_same_v<T, UnarySign>) {
-                    checkPrimary(*prim.operand);
-                }
-            },
-            primary);
-    }
-
-    void checkModifiablePrimary(const ModifiablePrimary& mp) {
-        table.varExists(mp);
-        table.markVarUsed(mp.variable.text);
-        if (!mp.accessors.empty()) {
-            std::reference_wrapper<const Type> current_type = table.getVariableType(mp.variable);
-            for (const auto& accessor : mp.accessors) {
-                current_type = checkAccessor(mp, current_type.get(), accessor);
+        for (auto& [_, operand] : expr.rest) {
+            const TypeId operand_type = checkBooleanExpression(operand);
+            if (last_type != table.BooleanTypeId || operand_type != table.BooleanTypeId) {
+                const TypeInfo& info1 = table.getTypeInfo(last_type);
+                const TypeInfo& info2 = table.getTypeInfo(operand_type);
+                throw SemanticError{"Invalid types '" + info1.name + "' and '" + info2.name + "' for boolean operation",
+                                    getSpan(expr)};
             }
+            last_type = table.BooleanTypeId;
         }
+        return last_type;
     }
 
-    const Type& checkAccessor(const ModifiablePrimary& mp,
-                              const Type& type_of_last,
-                              const std::variant<Expression, Identifier>& accessor) { // NOLINT(*complexity*)
+    TypeId checkBooleanExpression(BooleanExpression& bool_expr) {
+        return std::visit(overloaded{[this](Relation& relation) { return checkRelation(relation); },
+                                     [this](NotExpression& not_expr) { return checkNotExpression(not_expr); }},
+                          bool_expr);
+    }
+
+    TypeId checkRelation(Relation& relation) {
+        TypeId first = checkNumberExpression(relation.first);
+        if (!relation.second)
+            return first;
+        TypeId second = checkNumberExpression(relation.second->next_operand);
+        if (!areForNumericOperation(first, second)) {
+            const TypeInfo& info1 = table.getTypeInfo(first);
+            const TypeInfo& info2 = table.getTypeInfo(second);
+            throw SemanticError{"Invalid types '" + info1.name + "' and '" + info2.name + "' for numeric operation",
+                                getSpan(relation)};
+        }
+        return table.BooleanTypeId;
+    }
+
+    TypeId checkNotExpression(NotExpression& not_expr) {
+        TypeId type = checkPrimary(not_expr.operand);
+        if (type != table.IntegerTypeId || type != table.BooleanTypeId) {
+            throw SemanticError{"Invalid operand type '" + table.getTypeInfo(type).name + "' for numeric operation",
+                                not_expr.not_span};
+        }
+        return table.BooleanTypeId;
+    }
+
+    TypeId checkNumberExpression(NumberExpression& num_expr) {
+        TypeId last_type = checkSummand(num_expr.first);
+        for (auto& [_, operand, operation_type] : num_expr.rest) {
+            const TypeId operand_type = checkSummand(operand);
+            if (!areForNumericOperation(last_type, operand_type)) {
+                const TypeInfo& info1 = table.getTypeInfo(last_type);
+                const TypeInfo& info2 = table.getTypeInfo(operand_type);
+                throw SemanticError{"Invalid types '" + info1.name + "' and '" + info2.name + "' for numeric operation",
+                                    getSpan(num_expr)};
+            }
+            if (last_type == table.RealTypeId || operand_type == table.RealTypeId)
+                operation_type = table.RealTypeId;
+            else
+                operation_type = table.IntegerTypeId;
+            last_type = operand_type;
+        }
+        return last_type;
+    }
+
+    TypeId checkSummand(Summand& summand) {
+        TypeId last_type = checkPrimary(summand.first);
+        for (auto& [_, operand, operation_type] : summand.rest) {
+            const TypeId operand_type = checkPrimary(operand);
+            if (!areForNumericOperation(last_type, operand_type)) {
+                const TypeInfo& info1 = table.getTypeInfo(last_type);
+                const TypeInfo& info2 = table.getTypeInfo(operand_type);
+                throw SemanticError{"Invalid types '" + info1.name + "' and '" + info2.name + "' for operation",
+                                    getSpan(summand)};
+            }
+            if (last_type == table.RealTypeId || operand_type == table.RealTypeId)
+                operation_type = table.RealTypeId;
+            else
+                operation_type = table.IntegerTypeId;
+            last_type = operand_type;
+        }
+        return last_type;
+    }
+
+    TypeId checkPrimary(Primary& primary) {
+        return std::visit(overloaded{
+                              [](const IntegerLiteral&) { return SymbolTable::IntegerTypeId; },
+                              [](const RealLiteral&) { return SymbolTable::RealTypeId; },
+                              [](const BooleanLiteral&) { return SymbolTable::BooleanTypeId; },
+                              [this](RoutineCall& call) {
+                                  std::optional<TypeId> type = checkRoutineCall(call);
+                                  if (!type) {
+                                      throw SemanticError{"Trying to use void procedure as an expression",
+                                                          call.routine_name.span};
+                                  }
+                                  return *type;
+                              },
+                              [this](ModifiablePrimary& mp) { return checkModifiablePrimary(mp); },
+                              [this](UnarySign& op) { return op.type = checkPrimary(*op.operand); },
+                              [this](ParenthesizedExpression& par) { return checkExpression(*par.expression); },
+                          },
+                          primary);
+    }
+
+    TypeId checkModifiablePrimary(ModifiablePrimary& mp) {
+        table.ensureVarExists(mp);
+        table.markVarUsed(mp.variable.text);
+        mp.variable_type = table.getVariableType(mp.variable);
+        if (!mp.accessors.empty()) {
+            TypeId current_type = mp.variable_type;
+            for (ModifiablePrimary::Accessor& accessor : mp.accessors) {
+                current_type = checkAccessor(current_type, accessor);
+            }
+            return current_type;
+        }
+        return mp.variable_type;
+    }
+
+    TypeId checkAccessor(TypeId type_of_last, ModifiablePrimary::Accessor& accessor) {
         return std::visit(
-            overloaded{
-                [&](const Identifier& field_name) -> const Type& { return checkField(mp, type_of_last, field_name); },
-                [&](const Expression& index) -> const Type& { return checkIndex(mp, type_of_last, index); },
-            },
-            accessor);
+            overloaded{[&](Identifier& field_name) { return checkField(type_of_last, accessor.type, field_name); },
+                       [&](Index& index) { return checkIndex(type_of_last, accessor.type, index); }},
+            accessor.key);
     }
 
-    // TODO: remove ModifiablePrimary parameter and find the name of last type
-    const Type& checkField(const ModifiablePrimary& mp, const Type& type_of_last, const Identifier& field_name) {
-        const Type& resolved_type = table.resolveType(type_of_last);
+    TypeId checkField(TypeId type_id_of_last, TypeId& accessor_type, Identifier& field_name) {
+        const TypeInfo& type_info_of_last = table.getTypeInfo(type_id_of_last);
 
-        if (std::holds_alternative<ArrayTypeInfo>(resolved_type)) {
+        if (std::holds_alternative<ArrayTypeInfo>(type_info_of_last.definition)) {
             if (field_name.text == "size")
-                return IntegerTypeInfo{};
-            throw SemanticError{"Variable " + mp.variable.text + " has no field named '" + field_name.text + "'",
+                return accessor_type = table.IntegerTypeId;
+            throw SemanticError{"Type " + type_info_of_last.name + " has no field named '" + field_name.text + "'",
                                 field_name.span};
         }
-        if (!std::holds_alternative<RecordTypeInfo>(resolved_type))
+
+        if (!std::holds_alternative<RecordTypeInfo>(type_info_of_last.definition))
             throw SemanticError{"Cannot access field '" + field_name.text + "' on non-record type", field_name.span};
 
-        for (const VariableDeclaration& field : std::get<RecordType>(resolved_type).fields) {
-            if (field.name.text == field_name.text) {
-                if (!field.type) {
-                    // TODO: deduce type of the field here
-                } else {
-                    return *field.type;
-                }
-            }
-        }
-        throw SemanticError{mp.variable.text + " has no field '" + field_name.text + "'", field_name.span};
+        const auto& record_info = std::get<RecordTypeInfo>(type_info_of_last.definition);
+        auto it = record_info.fields.find(field_name.text);
+        if (it != record_info.fields.end())
+            return accessor_type = it->second;
+        throw SemanticError{"Type " + type_info_of_last.name + " has no field named '" + field_name.text + "'",
+                            field_name.span};
     }
 
-    const Type& checkIndex(const ModifiablePrimary& mp, const Type& type_of_last, const Expression& index) {
-        const Type& resolved_type = table.resolveType(type_of_last);
+    TypeId checkIndex(TypeId type_id_of_last, TypeId& accessor_type, Index& index) {
+        const TypeInfo& type_info_of_last = table.getTypeInfo(type_id_of_last);
 
-        if (!std::holds_alternative<ArrayTypeInfo>(resolved_type))
-            throw SemanticError{"Cannot index non-array type", mp.variable.span};
+        if (!std::holds_alternative<ArrayTypeInfo>(type_info_of_last.definition))
+            throw SemanticError{"Cannot index non-array type", index.bracket_span};
 
-        checkExpression(index);
-        const auto& array = std::get<ArrayTypeInfo>(resolved_type);
-        return *array.element_type;
+        checkExpression(index.value);
+        if (index.value.type != table.IntegerTypeId)
+            throw SemanticError{"Array index must be of integer type", index.bracket_span};
+
+        return accessor_type = std::get<ArrayTypeInfo>(type_info_of_last.definition).element_type;
     }
 
-    void checkRoutineCall(const RoutineCall& call) {
+    std::optional<TypeId> checkRoutineCall(RoutineCall& call) {
         auto routine_it = table.getRoutines().find(call.routine_name.text);
-        if (routine_it == table.getRoutines().end()) {
+        if (routine_it == table.getRoutines().end())
             throw SemanticError{"Undeclared routine: " + call.routine_name.text, call.routine_name.span};
-        }
 
-        table.markRoutineUsed(call.routine_name.text);
-        const RoutineDeclaration& routine_decl = routine_it->second.declaration;
+        RoutineInfo& routine_info = routine_it->second;
+        routine_info.used = true;
 
-        if (call.arguments.size() != routine_decl.parameters.size()) {
-            throw SemanticError{std::format("Routine {} expects {} arguments, but {} are provided",
+        if (call.arguments.size() != routine_info.parameters.size()) {
+            throw SemanticError{std::format("Routine '{}' expects {} arguments, but {} are provided",
                                             call.routine_name.text,
-                                            routine_decl.parameters.size(),
+                                            routine_info.parameters.size(),
                                             call.arguments.size()),
                                 call.routine_name.span};
         }
 
-        for (const Expression& arg : call.arguments) {
+        for (auto [param_type, arg] : std::views::zip(routine_info.parameters, call.arguments)) {
             checkExpression(arg);
+            if (!table.isConvertibleTo(arg.type, param_type)) {
+                throw SemanticError{"Type '" + table.getTypeInfo(arg.type).name + "' is not convertible to '" +
+                                        table.getTypeInfo(param_type).name + "'",
+                                    getSpan(arg)};
+            }
         }
+
+        return call.type = routine_info.return_type;
     }
 
-    void checkType(const Type& type) {
+    void checkVariableDeclaration(VariableDeclaration& var) {
+        if (var.value)
+            checkExpression(*var.value);
+        if (var.type)
+            var.resolved_type = checkType(*var.type);
+        else
+            var.resolved_type = var.value->type;
+    }
+
+    TypeId checkType(Type& type) {
         std::visit(overloaded{[this](const Identifier& type_name) {
-                                  table.typeExists(type_name);
+                                  table.ensureTypeExists(type_name);
                                   table.markTypeUsed(type_name.text);
                               },
-                              [this](const ArrayTypeInfo& array) {
-                                  checkType(*array.element_type);
+                              [this](ArrayType& array) {
+                                  array.resolved_element_type = checkType(*array.element_type);
                                   if (array.size)
                                       checkExpression(*array.size);
-                                  if (std::holds_alternative<Identifier>(*array.element_type)) {
-                                      const auto& type_name = std::get<Identifier>(*array.element_type);
-                                      table.markTypeUsed(type_name.text);
-                                  }
+                                  // TODO: compute size
+                                  array.computed_size = 1;
                               },
-                              [this](const RecordTypeInfo& record) {
-                                  for (const VariableDeclaration& field : record.fields) {
-                                      if (field.type)
-                                          checkType(*field.type);
-                                      if (std::holds_alternative<Identifier>(*field.type)) {
-                                          const auto& type_name = std::get<Identifier>(*field.type);
-                                          table.markTypeUsed(type_name.text);
-                                      }
+                              [this](RecordType& record) {
+                                  for (VariableDeclaration& field : record.fields) {
+                                      checkVariableDeclaration(field);
                                   }
                               },
                               [](const auto&) {}},
                    type);
+        return table.resolveType(type);
     }
 
-    void checkBlock(const Block& block) {
+    void checkBlock(Block& block) {
         table.pushScope(block);
-        for (const auto& element : block) {
-            std::visit(overloaded{
-                           [&](const VariableDeclaration& var) {
-                               table.addLocalVariable(var.name, var.type ? &*var.type : nullptr);
-                               if (var.type)
-                                   checkType(*var.type);
-                               if (var.value)
-                                   checkExpression(*var.value);
-                           },
-                           [&](const TypeDeclaration& type) {
-                               table.addLocalType(type.name, type.type);
-                               checkType(type.type);
-                           },
-                           [&](const Statement& stmt) { checkStatement(stmt); },
-                       },
+        for (auto& element : block) {
+            std::visit(overloaded{[&](VariableDeclaration& var) {
+                                      checkVariableDeclaration(var);
+                                      table.addLocalVariable(var.name, var.resolved_type);
+                                  },
+                                  [&](TypeDeclaration& type) {
+                                      TypeId type_id = checkType(type.type);
+                                      table.addLocalTypeDeclaration(type.name, type_id);
+                                  },
+                                  [&](Statement& stmt) { checkStatement(stmt); }},
                        element);
         }
         table.popScope(block);
@@ -217,7 +279,7 @@ class SemanticAnalyzer {
             return;
 
         const std::unordered_map<std::string, VarInfo>& variable_usage = block_usage_it->second.variables;
-        const std::unordered_map<std::string, TypeInfo>& type_usage = block_usage_it->second.types;
+        const std::unordered_map<std::string, TypeId>& type_usage = block_usage_it->second.types;
 
         Block optimized;
         for (bool found_return = false; auto& element : block) {
@@ -231,7 +293,8 @@ class SemanticAnalyzer {
                                }
                            },
                            [&](TypeDeclaration& type) {
-                               if (type_usage.contains(type.name.text) && type_usage.at(type.name.text).used) {
+                               if (type_usage.contains(type.name.text) &&
+                                   table.getTypeInfo(type_usage.at(type.name.text)).used) {
                                    optimized.emplace_back(std::move(type));
                                }
                            },
@@ -247,9 +310,9 @@ class SemanticAnalyzer {
         block = std::move(optimized);
     }
 
-    void checkStatement(const Statement& stmt) {
+    void checkStatement(Statement& stmt) {
         std::visit(
-            [this](const auto& statement) {
+            [this](auto& statement) {
                 using T = std::decay_t<decltype(statement)>;
 
                 if constexpr (std::is_same_v<T, AssignmentStatement>) {
@@ -266,7 +329,7 @@ class SemanticAnalyzer {
                         checkBlock(*statement.false_branch);
                     }
                 } else if constexpr (std::is_same_v<T, PrintStatement>) {
-                    for (const auto& arg : statement.arguments) {
+                    for (auto& arg : statement.arguments) {
                         if (std::holds_alternative<Expression>(arg)) {
                             checkExpression(std::get<Expression>(arg));
                         }
@@ -298,28 +361,55 @@ class SemanticAnalyzer {
             stmt);
     }
 
-    void checkAssignment(const AssignmentStatement& assignment) {
-        checkModifiablePrimary(assignment.target);
-        checkExpression(assignment.expression);
+    void checkAssignment(AssignmentStatement& assignment) {
+        TypeId target_type = checkModifiablePrimary(assignment.target);
+        TypeId expr_type = checkExpression(assignment.expression);
+
         const Identifier& target_var = assignment.target.variable;
         if (assignment.target.accessors.empty() && table.getForLoopVariables().contains(target_var.text))
             throw SemanticError{"Cannot assign to for loop variable: " + target_var.text, target_var.span};
+
+        if (!table.isConvertibleTo(expr_type, target_type)) {
+            const TypeInfo& target_info = table.getTypeInfo(target_type);
+            const TypeInfo& expr_info = table.getTypeInfo(expr_type);
+            throw SemanticError{"Type '" + expr_info.name + "' is not convertible to '" + target_info.name + "'",
+                                getSpan(assignment.expression)};
+        }
     }
 
-    void checkForStatement(const ForStatement& for_stmt) {
+    void checkForStatement(ForStatement& for_stmt) {
         table.pushScope(for_stmt.body);
-        const Type& variable_type = IntegerTypeInfo{};
-        table.addLocalVariable(for_stmt.variable_name, &variable_type);
-        table.markVarUsed(for_stmt.variable_name.text);
-        table.getForLoopVariables().insert(for_stmt.variable_name.text);
 
-        if (std::holds_alternative<Expression>(for_stmt.range)) {
-            checkExpression(std::get<Expression>(for_stmt.range));
+        const bool is_foreach = std::holds_alternative<Expression>(for_stmt.range);
+        TypeId variable_type = -1;
+
+        if (is_foreach) {
+            auto& iterable = std::get<Expression>(for_stmt.range);
+            TypeId array_type_id = checkExpression(iterable);
+            const TypeInfo& array_type_info = table.getTypeInfo(array_type_id);
+
+            if (!std::holds_alternative<ArrayTypeInfo>(array_type_info.definition))
+                throw SemanticError{"Iterable must of an array type", getSpan(iterable)};
+
+            variable_type = std::get<ArrayTypeInfo>(array_type_info.definition).element_type;
         } else {
-            const auto& range = std::get<std::pair<Expression, Expression>>(for_stmt.range);
-            checkExpression(range.first);
-            checkExpression(range.second);
+            auto& range = std::get<std::pair<Expression, Expression>>(for_stmt.range);
+            TypeId first_type = checkExpression(range.first);
+            TypeId second_type = checkExpression(range.second);
+
+            if (first_type != table.IntegerTypeId)
+                throw SemanticError{"For loop range must be of integer type", getSpan(range.first)};
+            if (second_type != table.IntegerTypeId)
+                throw SemanticError{"For loop range must be of integer type", getSpan(range.second)};
+
+            variable_type = table.IntegerTypeId;
         }
+
+        table.addLocalVariable(for_stmt.variable_name, variable_type);
+        table.markVarUsed(for_stmt.variable_name.text);
+        if (table.getForLoopVariables().contains(for_stmt.variable_name.text))
+            throw SemanticError{"Do not create for loop variables with the same name", for_stmt.variable_name.span};
+        table.getForLoopVariables().insert(for_stmt.variable_name.text);
 
         checkBlock(for_stmt.body);
 
@@ -328,25 +418,36 @@ class SemanticAnalyzer {
     }
 
     void checkRoutineDeclaration(RoutineDeclaration& routine) {
-        for (const ParameterDeclaration& param : routine.parameters)
-            checkType(param.type);
+        for (ParameterDeclaration& param : routine.parameters)
+            param.resolved_type = checkType(param.type);
+        if (routine.return_type)
+            routine.return_type->resolved = checkType(routine.return_type->type);
 
         if (!routine.body)
             return;
 
         if (auto* expr = std::get_if<Expression>(&*routine.body)) {
-            checkExpression(*expr);
+            if (!routine.return_type)
+                throw SemanticError{"Arrow function must specify return type", getSpan(*expr)};
+
+            TypeId expr_type = checkExpression(*expr);
+            if (!table.isConvertibleTo(expr_type, routine.return_type->resolved)) {
+                const TypeInfo& return_type_info = table.getTypeInfo(routine.return_type->resolved);
+                const TypeInfo& expr_info = table.getTypeInfo(expr_type);
+                throw SemanticError{"Type '" + expr_info.name + "' is not convertible to '" + return_type_info.name +
+                                        "'",
+                                    getSpan(*expr)};
+            }
+
             Block block;
             block.emplace_back(ReturnStatement{.value = std::move(*expr)});
             *routine.body = std::move(block);
         }
-        const Block& body = std::get<Block>(*routine.body);
 
+        auto& body = std::get<Block>(*routine.body);
         table.pushScope(body);
         for (const ParameterDeclaration& param : routine.parameters)
-            table.addLocalVariable(param.name, &param.type);
-        if (routine.return_type)
-            checkType(*routine.return_type);
+            table.addLocalVariable(param.name, param.resolved_type);
         checkBlock(body);
         table.popScope(body);
     }
@@ -361,10 +462,10 @@ class SemanticAnalyzer {
     }
 
     void checkForwardDeclarations() {
-        for (const auto& [identifier, routine_info] : table.getRoutines()) {
+        for (const auto& [name, routine_info] : table.getRoutines()) {
             if (!routine_info.defined) {
-                throw SemanticError{"Forward declared routine \"" + identifier + "\" is never defined",
-                                    routine_info.declaration.get().name.span};
+                throw SemanticError{"Forward declared routine \"" + name + "\" is never defined",
+                                    routine_info.span_of_declaration};
             }
         }
     }
@@ -384,7 +485,7 @@ class SemanticAnalyzer {
             }
             if (std::holds_alternative<TypeDeclaration>(*it)) {
                 const auto& type_decl = std::get<TypeDeclaration>(*it);
-                if (!table.getGlobalScope().types.at(type_decl.name.text).used) {
+                if (!table.getTypeInfo(table.getGlobalScope().types.at(type_decl.name.text)).used) {
                     it = program.declarations.erase(it);
                     continue;
                 }
@@ -404,32 +505,35 @@ class SemanticAnalyzer {
     void checkProgram() {
         for (auto& decl : program.declarations) {
             std::visit(overloaded{
-                           [this](const VariableDeclaration& var) {
-                               table.addLocalVariable(var.name, var.type ? &*var.type : nullptr);
-                               if (var.type)
-                                   checkType(*var.type);
-                               if (var.value)
-                                   checkExpression(*var.value);
+                           [this](VariableDeclaration& var) {
+                               checkVariableDeclaration(var);
+                               table.addLocalVariable(var.name, var.resolved_type);
                            },
-                           [this](const TypeDeclaration& type) {
-                               table.addLocalType(type.name, type.name);
-                               checkType(type.type);
+                           [this](TypeDeclaration& type) {
+                               TypeId type_id = checkType(type.type);
+                               table.addLocalTypeDeclaration(type.name, type_id);
                            },
                            [this](RoutineDeclaration& routine) {
                                auto it = table.getRoutines().find(routine.name.text);
                                if (it != table.getRoutines().end()) {
                                    if (it->second.defined && routine.body)
-                                       throw SemanticError{"Duplicate routine declaration: " + routine.name.text,
+                                       throw SemanticError{"Duplicate routine definition: " + routine.name.text,
                                                            routine.name.span};
                                    if (routine.body)
                                        it->second.defined = true;
                                } else {
+                                   checkRoutineDeclaration(routine);
                                    bool is_defined = routine.body.has_value();
-                                   table.getRoutines().emplace(
-                                       routine.name.text,
-                                       RoutineInfo{.declaration = routine, .defined = is_defined, .used = false});
+                                   const auto& return_type = routine.return_type;
+                                   RoutineInfo info{.parameters = {},
+                                                    .return_type = return_type ? std::optional{return_type->resolved}
+                                                                               : std::nullopt,
+                                                    .span_of_declaration = routine.name.span,
+                                                    .defined = is_defined};
+                                   for (const ParameterDeclaration& param : routine.parameters)
+                                       info.parameters.push_back(param.resolved_type);
+                                   table.getRoutines().emplace(routine.name.text, std::move(info));
                                }
-                               checkRoutineDeclaration(routine);
                            },
                        },
                        decl);

@@ -25,7 +25,9 @@ struct VarInfo {
 };
 
 struct RoutineInfo {
-    std::reference_wrapper<const RoutineDeclaration> declaration;
+    std::vector<TypeId> parameters;
+    std::optional<TypeId> return_type;
+    Span span_of_declaration;
     bool defined;
     bool used = false;
 };
@@ -75,7 +77,7 @@ struct SymbolTable {
     std::unordered_map<std::string, RoutineInfo> routines;
     std::unordered_set<std::string> for_loop_variables;
 
-    std::unordered_map<const parser::Block*, Scope> scopes;
+    std::unordered_map<const parser::Block*, Scope> scopes; // initialize with global scope
     const parser::Block* current_block = nullptr;
 
     template <bool Const>
@@ -120,6 +122,10 @@ struct SymbolTable {
     static constexpr TypeId RealTypeId = 1;
     static constexpr TypeId BooleanTypeId = 2;
 
+    SymbolTable() {
+        scopes.emplace(nullptr, Scope{nullptr});
+    }
+
     std::unordered_map<std::string, RoutineInfo>& getRoutines();
     std::unordered_map<const Block*, Scope>& getScopes();
     std::unordered_set<std::string>& getForLoopVariables();
@@ -133,12 +139,12 @@ struct SymbolTable {
     void pushScope(const Block& block);
     void popScope(const Block& block);
 
-    bool varExists(const ModifiablePrimary& mp) const;
-    bool typeExists(const Identifier& type_name) const;
-    bool typeExists(const Type& type) const;
+    void ensureVarExists(const ModifiablePrimary& mp) const;
+    void ensureTypeExists(const Identifier& type_name) const;
+    void ensureTypeExists(const Type& type) const;
 
-    void addLocalVariable(Identifier name, const Type& type);
-    void addLocalType(Identifier name, const Type& type);
+    void addLocalVariable(Identifier name, TypeId type);
+    void addLocalTypeDeclaration(Identifier name, TypeId type_id);
 
     ArrayTypeInfo createArrayTypeInfo(const parser::ArrayType& type);
     static RecordTypeInfo createRecordTypeInfo(const parser::RecordType& type);
@@ -146,6 +152,8 @@ struct SymbolTable {
     TypeId resolveType(const Type& type);
     TypeId resolveType(const Identifier& type);
     TypeId getVariableType(const Identifier& name) const;
+
+    bool isConvertibleTo(TypeId from, TypeId to) const;
 
     void markVarUsed(const std::string& identifier);
     void markTypeUsed(const std::string& identifier);

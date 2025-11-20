@@ -5,6 +5,7 @@
 #include "utils.hpp"
 
 #include <cassert>
+#include <concepts>
 #include <cstddef>
 #include <format>
 #include <string>
@@ -57,55 +58,44 @@ void SymbolTable::popScope(const Block& block) {
         current_block = scopes.find(current_block)->second.parent;
 }
 
-bool SymbolTable::varExists(const ModifiablePrimary& mp) const {
+void SymbolTable::ensureVarExists(const ModifiablePrimary& mp) const {
     for (const Scope& scope : getScopesView()) {
         if (scope.variables.contains(mp.variable.text))
-            return true;
+            return;
     }
     throw SemanticError{"Undeclared variable: " + mp.variable.text, mp.variable.span};
 }
 
-bool SymbolTable::typeExists(const Identifier& type_name) const {
+void SymbolTable::ensureTypeExists(const Identifier& type_name) const {
     for (const Scope& scope : getScopesView()) {
         if (scope.types.contains(type_name.text))
-            return true;
+            return;
     }
     throw SemanticError{"Undeclared type: " + type_name.text, type_name.span};
 }
 
-bool SymbolTable::typeExists(const Type& type) const {
+void SymbolTable::ensureTypeExists(const Type& type) const {
     if (std::holds_alternative<Identifier>(type))
-        return typeExists(std::get<Identifier>(type));
-    return true;
+        ensureTypeExists(std::get<Identifier>(type));
 }
 
-void SymbolTable::addLocalVariable(Identifier name, const Type& type) {
+void SymbolTable::addLocalVariable(Identifier name, TypeId type) {
     Scope& last_scope = getCurrentScope();
     if (last_scope.variables.contains(name.text))
         throw SemanticError{"Duplicate variable declaration: " + name.text, name.span};
-    last_scope.variables.emplace(std::move(name.text), resolveType(type));
+    last_scope.variables.emplace(std::move(name.text), type);
 }
 
-void SymbolTable::addLocalType(Identifier name, const Type& type) {
+void SymbolTable::addLocalTypeDeclaration(Identifier name, TypeId type_id) {
     Scope& last_scope = getCurrentScope();
     if (last_scope.types.contains(name.text))
         throw SemanticError{"Duplicate type declaration: " + name.text, name.span};
 
-    TypeId type_id = std::visit(overloaded{
-                                    [](const parser::IntegerType&) { return IntegerTypeId; },
-                                    [](const parser::RealType&) { return RealTypeId; },
-                                    [](const parser::BoolType&) { return BooleanTypeId; },
-                                    [this, &name](const parser::ArrayType& at) {
-                                        types.emplace_back(createArrayTypeInfo(at), std::move(name.text));
-                                        return types.size() - 1;
-                                    },
-                                    [this, &name](const parser::RecordType& rt) {
-                                        types.emplace_back(createRecordTypeInfo(rt), std::move(name.text));
-                                        return types.size() - 1;
-                                    },
-                                    [this](const parser::Identifier& type_name) { return resolveType(type_name); },
-                                },
-                                type);
+    TypeInfo& type_info = types[type_id];
+    // fix anonymous creation from resolveType()
+    if (std::holds_alternative<RecordTypeInfo>(type_info.definition))
+        type_info.name = name.text;
+
     last_scope.types.emplace(std::move(name.text), type_id);
 }
 
@@ -126,14 +116,29 @@ TypeId SymbolTable::resolveType(const Identifier& type_name) {
     throw SemanticError{"Undeclared type: " + type_name.text, type_name.span};
 }
 
+namespace {
+
+std::string encodeArrayTypeName(const ArrayTypeInfo& array) {
+    return std::format("{}[{}]", array.element_type, array.size);
+}
+
+} // namespace
+
 TypeId SymbolTable::resolveType(const Type& type) {
     return std::visit(overloaded{
                           [](const parser::IntegerType&) { return IntegerTypeId; },
                           [](const parser::RealType&) { return RealTypeId; },
                           [](const parser::BoolType&) { return BooleanTypeId; },
                           [this](const parser::ArrayType& at) {
+                              ArrayTypeInfo info = createArrayTypeInfo(at);
+                              std::string encoded_type_name = encodeArrayTypeName(info);
+                              if (getGlobalScope().types.contains(encoded_type_name))
+                                  return getGlobalScope().types.at(encoded_type_name);
+
                               TypeId type_id = types.size();
-                              types.emplace_back(createArrayTypeInfo(at), std::format("unnamed{}", type_id));
+                              types.emplace_back(
+                                  info, std::format("array[{}] of {}", info.size, getTypeInfo(info.element_type).name));
+                              getGlobalScope().types.emplace(encoded_type_name, type_id);
                               return type_id;
                           },
                           [this](const parser::RecordType& rt) {
@@ -162,8 +167,26 @@ RecordTypeInfo SymbolTable::createRecordTypeInfo(const parser::RecordType& type)
 }
 
 const TypeInfo& SymbolTable::getTypeInfo(TypeId type_id) const {
-    assert(type_id >= 0 && "Unresolved type given");
+    assert(type_id != static_cast<TypeId>(-1) && "Unresolved type given");
     return types[type_id];
+}
+
+bool SymbolTable::isConvertibleTo(TypeId from, TypeId to) const {
+    const TypeInfo& from_info = getTypeInfo(from);
+    const TypeInfo& to_info = getTypeInfo(to);
+    return std::visit(overloaded{
+                          [from, to](const RecordTypeInfo&, const RecordTypeInfo&) { return from == to; },
+                          [from, to](const ArrayTypeInfo&, const ArrayTypeInfo&) { return from == to; },
+                          [](IntegerTypeInfo, RealTypeInfo) { return true; },
+                          [](IntegerTypeInfo, BooleanTypeInfo) { return true; },
+                          [](RealTypeInfo, IntegerTypeInfo) { return true; },
+                          [](RealTypeInfo, BooleanTypeInfo) { return false; },
+                          [](BooleanTypeInfo, IntegerTypeInfo) { return true; },
+                          [](BooleanTypeInfo, RealTypeInfo) { return true; },
+                          []<class T1, class T2>(const T1&, const T2&) { return std::same_as<T1, T2>; },
+                      },
+                      from_info.definition,
+                      to_info.definition);
 }
 
 void SymbolTable::markVarUsed(const std::string& identifier) {

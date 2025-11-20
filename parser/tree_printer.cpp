@@ -78,7 +78,7 @@ class TreePrinter {
 
         if (decl.return_type) {
             out << " : ";
-            printDeduced(*decl.return_type);
+            printDeduced(decl.return_type->type);
         }
 
         if (decl.body) {
@@ -201,7 +201,7 @@ class TreePrinter {
             newline();
             print_indent();
             out << "Operation: ";
-            switch (relation.second->first) {
+            switch (relation.second->operator_) {
             case parser::Relation::Operator::Less:
                 out << "< ";
                 break;
@@ -222,7 +222,7 @@ class TreePrinter {
                 break;
             }
             newline();
-            printDeduced(relation.second->second);
+            printDeduced(relation.second->next_operand);
         }
         indent_level--;
     }
@@ -246,7 +246,7 @@ class TreePrinter {
         newline();
         indent_level++;
         printDeduced(num_expr.first);
-        for (const auto& [op, summand] : num_expr.rest) {
+        for (const auto& [op, summand, _] : num_expr.rest) {
             newline();
             print_indent();
             out << "Operation: ";
@@ -275,7 +275,7 @@ class TreePrinter {
         indent_level++;
         printDeduced(summand.first);
 
-        for (const auto& [op, primary] : summand.rest) {
+        for (const auto& [op, primary, _] : summand.rest) {
             newline();
             print_indent();
             out << "Operation: ";
@@ -342,11 +342,11 @@ class TreePrinter {
         out << "Identifier: " << mp.variable.text << '\n';
         for (const auto& [key, _] : mp.accessors) {
             std::visit(overloaded{
-                           [this](const parser::Expression& index) {
+                           [this](const parser::Index& index) {
                                print_indent();
                                out << "Index:\n";
                                indent_level++;
-                               printDeduced(index);
+                               printDeduced(index.value);
                                newline();
                                indent_level--;
                            },

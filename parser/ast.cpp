@@ -21,7 +21,7 @@ Span getSpan(const BooleanExpression& expr) {
 
 Span getSpan(const Relation& relation) {
     Span first = getSpan(relation.first);
-    return relation.second ? first : first | getSpan(relation.second->next_operand);
+    return !relation.second ? first : first | getSpan(relation.second->next_operand);
 }
 
 Span getSpan(const NumberExpression& expr) {
