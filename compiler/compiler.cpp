@@ -4,9 +4,12 @@
 #include "compiler/compile_error.hpp"
 #include "parser/ast.hpp"
 
+#include <llvm/IR/Constant.h>
 #include <llvm/IR/Constants.h>
 #include <llvm/IR/DerivedTypes.h>
 #include <llvm/IR/Function.h>
+#include <llvm/IR/GlobalValue.h>
+#include <llvm/IR/GlobalVariable.h>
 #include <llvm/IR/IRBuilder.h>
 #include <llvm/IR/LLVMContext.h>
 #include <llvm/IR/LegacyPassManager.h>
@@ -33,6 +36,7 @@ struct Compiler {
     std::unique_ptr<llvm::LLVMContext> context = std::make_unique<LLVMContext>();
     std::unique_ptr<llvm::IRBuilder<>> builder = std::make_unique<IRBuilder<>>(*context);
     std::unique_ptr<llvm::Module> module = std::make_unique<Module>("Module", *context);
+
     std::unordered_map<std::string, Value*> namedValues;
 
     SymbolTable* symbolTable;
@@ -61,6 +65,19 @@ struct Compiler {
                           },
                           type);
     }
+
+    // Value* generateCast(const Value* llvmExpression, TypeId typeId, const Span& span) {
+    //     llvm::Type* type = llvmExpression->getType();
+    //     if (type != builder->getInt32Ty() && type != builder->getDoubleTy() && type != builder->getInt1Ty()) {
+    //         throw CompileError{"Expression cannot be casted to specified type", span};
+    //     }
+    //     if (typeId == analyzer::SymbolTable::BooleanTypeId) {
+    //     }
+    //     if (typeId == analyzer::SymbolTable::IntegerTypeId) {
+    //     }
+    //     if (typeId == analyzer::SymbolTable::RealTypeId) {
+    //     }
+    // }
 
     Value* generateExpression(const parser::Expression& expr) {
         Value* result = generateBooleanExpression(expr.first);
@@ -199,14 +216,14 @@ struct Compiler {
             return llvm::ConstantFP::get((llvm::Type::getDoubleTy(*context)), std::get<RealLiteral>(primary).value);
         }
         if (std::holds_alternative<parser::BooleanLiteral>(primary)) {
-            return llvm::ConstantInt::getSigned((llvm::Type::getInt1Ty(*context)),
-                                                static_cast<int64_t>(std::get<BooleanLiteral>(primary).value));
+            return llvm::ConstantInt::get((llvm::Type::getInt1Ty(*context)),
+                                          static_cast<int64_t>(std::get<BooleanLiteral>(primary).value));
         }
         if (std::holds_alternative<parser::RoutineCall>(primary)) {
             return generateRoutineCall(std::get<parser::RoutineCall>(primary));
         }
         if (std::holds_alternative<parser::ModifiablePrimary>(primary)) {
-            // TODO
+            return generateModifiablePrimary(std::get<parser::ModifiablePrimary>(primary));
         }
         if (std::holds_alternative<parser::UnarySign>(primary)) {
             const auto& unSign = std::get<parser::UnarySign>(primary);
@@ -222,6 +239,8 @@ struct Compiler {
         return generateExpression(*std::get<parser::ParenthesizedExpression>(primary).expression);
     }
 
+    Value* generateModifiablePrimary(const parser::ModifiablePrimary& primary) {}
+
     Value* generateRoutineCall(const parser::RoutineCall& call) {
         std::vector<Value*> parameters;
         parameters.reserve(call.arguments.size());
@@ -232,7 +251,7 @@ struct Compiler {
         return builder->CreateCall(module->getFunction(call.routine_name.text), parameters, "calltmp");
     }
 
-    void generateVariableDeclaration(const parser::VariableDeclaration& declaration) { // TODO void?
+    void generateGlobalVariableDeclaration(const parser::VariableDeclaration& declaration) { // TODO void?
         llvm::Type* llvmType = nullptr;
         Value* initialValue = nullptr;
 
@@ -241,8 +260,45 @@ struct Compiler {
             if (declaration.value) {
                 initialValue = generateExpression(*declaration.value);
                 if (declaration.resolved_type != declaration.value->type) {
-                    initialValue = generateCast(declaration.value, declaration.value->type);
+                    // initialValue = generateCast(
+                    //     generateExpression(*declaration.value), declaration.value->type,
+                    //     getSpan(*declaration.value));
+                    // TODO
                 }
+            } else {
+                initialValue = Constant::getNullValue(llvmType);
+            }
+        } else if (declaration.value) {
+            initialValue = generateExpression(*declaration.value);
+            llvmType = getLLVMType(symbolTable->getTypeInfo(declaration.resolved_type));
+            assert(initialValue->getType() == llvmType);
+        } else {
+            throw CompileError{"Variable declaration " + declaration.name.text +
+                                   " must have either type or initial value",
+                               declaration.name.span}; // Ya zshe mamoi klyalsya, ne budet takogo (c) Maxim Fomin
+        }
+        auto* initialConst = dyn_cast<Constant>(initialValue);
+        auto* globalVariable = new GlobalVariable(
+            llvmType, false, llvm::GlobalValue::InternalLinkage, initialConst, declaration.name.text);
+        namedValues[declaration.name.text] = globalVariable;
+    }
+
+    void generateLocalVariableDeclaration(const parser::VariableDeclaration& declaration) { // TODO void?
+        llvm::Type* llvmType = nullptr;
+        Value* initialValue = nullptr;
+
+        if (declaration.type) {
+            llvmType = getLLVMType(symbolTable->getTypeInfo(declaration.resolved_type));
+            if (declaration.value) {
+                initialValue = generateExpression(*declaration.value);
+                if (declaration.resolved_type != declaration.value->type) {
+                    // initialValue = generateCast(
+                    //     generateExpression(*declaration.value), declaration.value->type,
+                    //     getSpan(*declaration.value));
+                    // TODO
+                }
+            } else {
+                initialValue = Constant::getNullValue(llvmType);
             }
         } else if (declaration.value) {
             initialValue = generateExpression(*declaration.value);
@@ -254,17 +310,24 @@ struct Compiler {
                                declaration.name.span}; // Ya zshe mamoi klyalsya, ne budet takogo (c) Maxim Fomin
         }
 
-        // TODO: what next?
+        BasicBlock* currentBlock = builder->GetInsertBlock();
+        Function* currentFunction = builder->GetInsertBlock()->getParent();
+        IRBuilder<> allocaBuilder(&currentFunction->getEntryBlock(), currentFunction->getEntryBlock().begin());
+
+        AllocaInst* alloca = allocaBuilder.CreateAlloca(llvmType, nullptr, declaration.name.text);
+        builder->SetInsertPoint(currentBlock);
+        builder->CreateStore(initialValue, alloca);
+        namedValues[declaration.name.text] = alloca;
     }
 
     Function* generateRoutineDeclaration(const parser::RoutineDeclaration& declaration) {
         llvm::Type* returnType = declaration.return_type
-                                     ? getLLVMType(symbolTable->getTypeInfo(declaration.resolved_return_type))
+                                     ? getLLVMType(symbolTable->getTypeInfo(declaration.return_type->resolved))
                                      : builder->getVoidTy();
         std::vector<llvm::Type*> paramTypes;
         paramTypes.reserve(declaration.parameters.size());
         for (const auto& param : declaration.parameters) {
-            paramTypes.push_back(getLLVMType(param.type));
+            paramTypes.push_back(getLLVMType(symbolTable->getTypeInfo(param.resolved_type)));
         }
         FunctionType* functionType = FunctionType::get(returnType, paramTypes, false);
         Function* function =
@@ -283,7 +346,7 @@ struct Compiler {
             } else if (std::holds_alternative<RoutineDeclaration>(declaration)) {
                 generateRoutineDeclaration(std::get<RoutineDeclaration>(declaration));
             } else if (std::holds_alternative<VariableDeclaration>(declaration)) {
-                generateVariableDeclaration(std::get<VariableDeclaration>(declaration));
+                generateGlobalVariableDeclaration(std::get<VariableDeclaration>(declaration));
             }
         }
     }
