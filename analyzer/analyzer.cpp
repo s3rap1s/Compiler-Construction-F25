@@ -536,7 +536,7 @@ class SemanticAnalyzer {
                                                            routine.name.span};
                                    if (routine.body)
                                        it->second.defined = true;
-                                   checkRoutineDeclaration(routine);
+                                   it->second.last_return = checkRoutineDeclaration(routine);
                                } else {
                                    bool last_return = checkRoutineDeclaration(routine);
                                    bool is_defined = routine.body.has_value();

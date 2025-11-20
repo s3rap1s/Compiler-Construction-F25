@@ -785,6 +785,7 @@ struct Compiler {
         if (declaration.body) {
             if (std::holds_alternative<Block>(*declaration.body)) {
                 generateBlock(std::get<Block>(*declaration.body));
+                // return for void functions can be ommited
                 if (!symbolTable.getRoutines().find(declaration.name.text)->second.last_return && !declaration.return_type)
                     builder->CreateRetVoid();
             } else {

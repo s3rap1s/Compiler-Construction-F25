@@ -47,3 +47,6 @@
 # CMake
 CMakeCache.txt
 CMakeFiles/
+
+/output.ll
+/a
