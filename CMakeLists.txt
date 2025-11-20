@@ -16,12 +16,8 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 # Compiler options
 add_compile_options(-Wall -Wextra -Wno-unused-parameter)
 
-# Hardcoded paths for LLVM (adjust for your system)
-set(LLVM_INCLUDE_DIRS "/usr/include/llvm-21" "/usr/include/llvm")
-set(LLVM_LIBRARIES 
-    LLVM-21
-    # or try: /usr/lib/llvm-21/lib/libLLVMCore.so
-)
+set(LLVM_INCLUDE_DIRS "/usr/include/llvm")
+set(LLVM_LIBRARIES LLVM-21)
 
 # main program
 add_executable(main
@@ -49,4 +45,4 @@ target_include_directories(main PRIVATE
 )
 
 # Link with LLVM
-target_link_libraries(main ${LLVM_LIBS} m) 
+target_link_libraries(main ${LLVM_LIBRARIES})

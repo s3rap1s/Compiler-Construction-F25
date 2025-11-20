@@ -525,6 +525,7 @@ class SemanticAnalyzer {
                                                            routine.name.span};
                                    if (routine.body)
                                        it->second.defined = true;
+                                   checkRoutineDeclaration(routine);
                                } else {
                                    checkRoutineDeclaration(routine);
                                    bool is_defined = routine.body.has_value();
