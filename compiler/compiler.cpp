@@ -4,6 +4,7 @@
 #include "compiler/compile_error.hpp"
 #include "parser/ast.hpp"
 
+#include <cassert>
 #include <iostream>
 #include <llvm/IR/Constant.h>
 #include <llvm/IR/Constants.h>
@@ -23,6 +24,7 @@
 #include <memory>
 #include <string>
 #include <unordered_map>
+#include <utility>
 #include <variant>
 #include <vector>
 
@@ -297,6 +299,79 @@ struct Compiler {
             throw CompileError{"Undeclared variable: " + primary.variable.text, primary.variable.span};
         }
 
+        // For array iteration, we need the POINTER, not the value
+        // Only load at the very end if we're not doing array access
+        Value* current = base; // Start with the pointer
+        TypeId currentTypeId = primary.variable_type;
+
+        // Process accessors
+        for (const auto& accessor : primary.accessors) {
+            if (std::holds_alternative<Index>(accessor.key)) {
+                const auto& index = std::get<Index>(accessor.key);
+
+                // Generate index expression
+                Value* indexValue = generateExpression(index.value);
+
+                // Get array type info
+                const TypeInfo& typeInfo = symbolTable.getTypeInfo(currentTypeId);
+                if (!std::holds_alternative<ArrayTypeInfo>(typeInfo.definition)) {
+                    throw CompileError{"Indexing non-array type", index.bracket_span};
+                }
+
+                const auto& arrayInfo = std::get<ArrayTypeInfo>(typeInfo.definition);
+
+                // Generate GEP for array access - current is already a pointer
+                std::vector<Value*> indices = {ConstantInt::get(builder->getInt32Ty(), 0), indexValue};
+
+                current = builder->CreateGEP(getLLVMType(typeInfo), current, indices, "arrayidx");
+                currentTypeId = arrayInfo.element_type;
+            } else {
+                const auto& field = std::get<Identifier>(accessor.key);
+
+                // Get record type info
+                const TypeInfo& typeInfo = symbolTable.getTypeInfo(currentTypeId);
+                if (!std::holds_alternative<RecordTypeInfo>(typeInfo.definition)) {
+                    throw CompileError{"Accessing field of non-record type", field.span};
+                }
+
+                const auto& recordInfo = std::get<RecordTypeInfo>(typeInfo.definition);
+
+                // Find field index
+                int fieldIndex = -1;
+                for (int i = 0; i < recordInfo.fields.size(); ++i) {
+                    if (recordInfo.fields[i].first == field.text) {
+                        fieldIndex = i;
+                        break;
+                    }
+                }
+
+                if (fieldIndex == -1) {
+                    throw CompileError{"No such field in record: " + field.text, field.span};
+                }
+
+                // Generate GEP for field access - current is already a pointer
+                std::vector<Value*> indices = {ConstantInt::get(builder->getInt32Ty(), 0),
+                                               ConstantInt::get(builder->getInt32Ty(), fieldIndex)};
+
+                current = builder->CreateGEP(getLLVMType(typeInfo), current, indices, "fieldptr");
+                currentTypeId = recordInfo.fields[fieldIndex].second;
+            }
+        }
+
+        // Only load if this is being used as a value (not for array iteration)
+        // For now, always load - we'll need to differentiate usage contexts
+        Value* loadedValue =
+            builder->CreateLoad(getLLVMType(symbolTable.getTypeInfo(currentTypeId)), current, "loadtmp");
+        return loadedValue;
+    }
+
+    Value* generateModifiablePrimary1(const parser::ModifiablePrimary& primary) {
+        // Look up the variable
+        Value* base = namedValues[primary.variable.text];
+        if (!base) {
+            throw CompileError{"Undeclared variable: " + primary.variable.text, primary.variable.span};
+        }
+
         // Load the base value
         Value* current =
             builder->CreateLoad(getLLVMType(symbolTable.getTypeInfo(primary.variable_type)), base, "loadtmp");
@@ -528,8 +603,206 @@ struct Compiler {
     }
 
     void generateForLoop(const ForStatement& forStmt) {
-        // Implementation for FOR loops
-        // This is complex and would need more context about the range handling
+        Function* function = builder->GetInsertBlock()->getParent();
+
+        // Create basic blocks for the loop
+        BasicBlock* condBlock = BasicBlock::Create(*context, "for.cond", function);
+        BasicBlock* bodyBlock = BasicBlock::Create(*context, "for.body", function);
+        BasicBlock* endBlock = BasicBlock::Create(*context, "for.end", function);
+
+        // Save current named values to restore later
+        auto oldNamedValues = namedValues;
+
+        // Handle different range types
+        if (std::holds_alternative<Expression>(forStmt.range)) {
+            // Case 1: Loop over array
+            generateArrayForLoop(forStmt, condBlock, bodyBlock, endBlock, function);
+        } else {
+            // Case 2: Loop over integer range
+            generateRangeForLoop(forStmt, condBlock, bodyBlock, endBlock, function);
+        }
+
+        // Restore named values
+        namedValues = std::move(oldNamedValues);
+
+        // Continue from end block
+        builder->SetInsertPoint(endBlock);
+    }
+
+    void generateArrayForLoop(const ForStatement& forStmt,
+                              BasicBlock* condBlock,
+                              BasicBlock* bodyBlock,
+                              BasicBlock* endBlock,
+                              Function* function) {
+        const auto& arrayExpr = std::get<Expression>(forStmt.range);
+
+        // Generate code for the array expression - but we need the ARRAY POINTER, not the value
+        Value* arrayPtr = nullptr;
+
+        // Check if this is a modifiable primary (variable reference)
+        if (const auto* rel = std::get_if<Relation>(&arrayExpr.first)) {
+            if (const auto* mp = std::get_if<ModifiablePrimary>(&rel->first.first.first)) {
+                arrayPtr = generateModifiablePrimaryAddress(*mp); // Get the pointer, not the value
+            } else {
+                // For other expressions, we need to create a temporary allocation
+                Value* arrayValue = generateExpression(arrayExpr);
+                IRBuilder<> allocaBuilder(&function->getEntryBlock(), function->getEntryBlock().begin());
+                AllocaInst* tempAlloca = allocaBuilder.CreateAlloca(
+                    getLLVMType(symbolTable.getTypeInfo(arrayExpr.type)), nullptr, "temp_array");
+                builder->CreateStore(arrayValue, tempAlloca);
+                arrayPtr = tempAlloca;
+            }
+        } else {
+            std::unreachable();
+        }
+
+        // Get array type information
+        TypeId arrayTypeId = arrayExpr.type;
+        const TypeInfo& arrayTypeInfo = symbolTable.getTypeInfo(arrayTypeId);
+
+        if (!std::holds_alternative<ArrayTypeInfo>(arrayTypeInfo.definition)) {
+            throw CompileError{"For loop range must be an array", forStmt.variable_name.span};
+        }
+
+        const auto& arrayInfo = std::get<ArrayTypeInfo>(arrayTypeInfo.definition);
+        llvm::Type* elementType = getLLVMType(symbolTable.getTypeInfo(arrayInfo.element_type));
+
+        // Create index variable
+        IRBuilder<> allocaBuilder(&function->getEntryBlock(), function->getEntryBlock().begin());
+        AllocaInst* indexAlloca = allocaBuilder.CreateAlloca(builder->getInt32Ty(), nullptr, "index");
+
+        // Initialize index
+        if (forStmt.is_reversed) {
+            // Start from last element (size - 1)
+            builder->CreateStore(ConstantInt::get(builder->getInt32Ty(), arrayInfo.size - 1), indexAlloca);
+        } else {
+            // Start from first element (0)
+            builder->CreateStore(ConstantInt::get(builder->getInt32Ty(), 0), indexAlloca);
+        }
+
+        // Create loop variable
+        AllocaInst* loopVarAlloca = allocaBuilder.CreateAlloca(elementType, nullptr, forStmt.variable_name.text);
+        namedValues[forStmt.variable_name.text] = loopVarAlloca;
+
+        // Jump to condition block
+        builder->CreateBr(condBlock);
+
+        // Condition block
+        builder->SetInsertPoint(condBlock);
+        Value* index = builder->CreateLoad(builder->getInt32Ty(), indexAlloca, "index");
+
+        Value* condValue = nullptr;
+        if (forStmt.is_reversed) {
+            // Check if index >= 0
+            condValue = builder->CreateICmpSGE(index, ConstantInt::get(builder->getInt32Ty(), 0), "loopcond");
+        } else {
+            // Check if index < array size
+            condValue =
+                builder->CreateICmpSLT(index, ConstantInt::get(builder->getInt32Ty(), arrayInfo.size), "loopcond");
+        }
+
+        builder->CreateCondBr(condValue, bodyBlock, endBlock);
+
+        // Body block
+        builder->SetInsertPoint(bodyBlock);
+
+        // Load current array element using the ARRAY POINTER
+        std::vector<Value*> indices = {ConstantInt::get(builder->getInt32Ty(), 0), index};
+        Value* elementPtr = builder->CreateGEP(getLLVMType(arrayTypeInfo), arrayPtr, indices, "elementptr");
+        Value* element = builder->CreateLoad(elementType, elementPtr, "element");
+
+        // Store element in loop variable
+        builder->CreateStore(element, loopVarAlloca);
+
+        // Generate loop body
+        generateBlock(forStmt.body);
+
+        // Update index
+        if (forStmt.is_reversed) {
+            // Decrement index
+            Value* nextIndex = builder->CreateSub(index, ConstantInt::get(builder->getInt32Ty(), 1), "nextindex");
+            builder->CreateStore(nextIndex, indexAlloca);
+        } else {
+            // Increment index
+            Value* nextIndex = builder->CreateAdd(index, ConstantInt::get(builder->getInt32Ty(), 1), "nextindex");
+            builder->CreateStore(nextIndex, indexAlloca);
+        }
+
+        // Jump back to condition
+        builder->CreateBr(condBlock);
+    }
+
+    void generateRangeForLoop(const ForStatement& forStmt,
+                              BasicBlock* condBlock,
+                              BasicBlock* bodyBlock,
+                              BasicBlock* endBlock,
+                              Function* function) {
+        const auto& range = std::get<std::pair<Expression, Expression>>(forStmt.range);
+        const auto& startExpr = range.first;
+        const auto& endExpr = range.second;
+
+        // Generate code for start and end expressions
+        Value* startValue = generateExpression(startExpr);
+        Value* endValue = generateExpression(endExpr);
+
+        // Convert to integers if needed
+        if (startValue->getType()->isFloatingPointTy()) {
+            startValue = builder->CreateFPToSI(startValue, builder->getInt32Ty(), "startconv");
+        }
+        if (endValue->getType()->isFloatingPointTy()) {
+            endValue = builder->CreateFPToSI(endValue, builder->getInt32Ty(), "endconv");
+        }
+
+        // Create loop variable
+        IRBuilder<> allocaBuilder(&function->getEntryBlock(), function->getEntryBlock().begin());
+        AllocaInst* loopVarAlloca =
+            allocaBuilder.CreateAlloca(builder->getInt32Ty(), nullptr, forStmt.variable_name.text);
+        namedValues[forStmt.variable_name.text] = loopVarAlloca;
+
+        // Initialize loop variable
+        if (forStmt.is_reversed) {
+            builder->CreateStore(endValue, loopVarAlloca);
+        } else {
+            builder->CreateStore(startValue, loopVarAlloca);
+        }
+
+        // Jump to condition block
+        builder->CreateBr(condBlock);
+
+        // Condition block
+        builder->SetInsertPoint(condBlock);
+        Value* loopVar = builder->CreateLoad(builder->getInt32Ty(), loopVarAlloca, "loopvar");
+
+        Value* condValue = nullptr;
+        if (forStmt.is_reversed) {
+            // Check if loopVar >= start
+            condValue = builder->CreateICmpSGE(loopVar, startValue, "loopcond");
+        } else {
+            // Check if loopVar <= end
+            condValue = builder->CreateICmpSLE(loopVar, endValue, "loopcond");
+        }
+
+        builder->CreateCondBr(condValue, bodyBlock, endBlock);
+
+        // Body block
+        builder->SetInsertPoint(bodyBlock);
+
+        // Generate loop body
+        generateBlock(forStmt.body);
+
+        // Update loop variable
+        if (forStmt.is_reversed) {
+            // Decrement loop variable
+            Value* nextValue = builder->CreateSub(loopVar, ConstantInt::get(builder->getInt32Ty(), 1), "nextval");
+            builder->CreateStore(nextValue, loopVarAlloca);
+        } else {
+            // Increment loop variable
+            Value* nextValue = builder->CreateAdd(loopVar, ConstantInt::get(builder->getInt32Ty(), 1), "nextval");
+            builder->CreateStore(nextValue, loopVarAlloca);
+        }
+
+        // Jump back to condition
+        builder->CreateBr(condBlock);
     }
 
     void generateIfStatement(const IfStatement& ifStmt) {
