@@ -4,10 +4,13 @@
 #include "compiler/compile_error.hpp"
 #include "parser/ast.hpp"
 
-#include <optional>
+#include <llvm/IR/Module.h>
+
+#include <expected>
 
 namespace compiler {
 
-std::optional<CompileError> compile(parser::Program& ast, analyzer::SymbolTable* symbolTable);
+std::expected<std::unique_ptr<llvm::Module>, CompileError> compile(const parser::Program& ast,
+                                                                   const analyzer::SymbolTable& symbolTable);
 
 } // namespace compiler

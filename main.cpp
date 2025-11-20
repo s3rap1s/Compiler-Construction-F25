@@ -1,5 +1,6 @@
 #include <cstddef>
 #include <cstdlib>
+#include <expected>
 #include <format>
 #include <fstream>
 #include <iostream>
@@ -14,6 +15,9 @@
 
 #include "analyzer/analyzer.hpp"
 #include "analyzer/semantic_error.hpp"
+#include "analyzer/symbol_table.hpp"
+#include "compiler/compile_error.hpp"
+#include "compiler/compiler.hpp"
 #include "lexer/lexer.hpp"
 #include "lexer/lexing_error.hpp"
 #include "lexer/token_printer.hpp"
@@ -28,6 +32,7 @@
 using namespace lexer;
 using namespace parser;
 using namespace analyzer;
+using namespace compiler;
 
 namespace {
 
@@ -110,6 +115,18 @@ void handleSemanticError(const SemanticError& error, std::string_view filename, 
     printErrorSpan(program, error.span);
 }
 
+void saveLLVMIRToFile(llvm::Module& module, const std::string& filename) {
+    std::error_code ec;
+    llvm::raw_fd_ostream out(filename, ec);
+    if (ec) {
+        logErrorLn("Failed to open {} for writing: {}", filename, ec.message());
+        return;
+    }
+    module.print(out, nullptr);
+    out.close();
+    logErrorLn("LLVM IR saved to {}", filename);
+}
+
 } // namespace
 
 int main(int argc, const char** argv) {
@@ -136,13 +153,18 @@ int main(int argc, const char** argv) {
         return EXIT_FAILURE;
     }
 
-    std::optional<SemanticError> semantic_error = analyze(*ast, entry_point);
-    if (semantic_error) {
+    std::expected<SymbolTable, SemanticError> symbol_table = analyze(*ast, entry_point);
+    if (!symbol_table) {
         program_text = std::move(lexer).getProgramText();
-        handleSemanticError(*semantic_error, filename, program_text);
+        handleSemanticError(symbol_table.error(), filename, program_text);
         return EXIT_FAILURE;
     }
-    print_tree(*ast);
-
+    // print_tree(*ast);
+    std::expected<std::unique_ptr<llvm::Module>, CompileError> compile_res = compile(*ast, *symbol_table);
+    if (!compile_res) {
+        return EXIT_FAILURE;
+    }
+    auto module = std::move(*compile_res);
+    saveLLVMIRToFile(*module, "output.ll");
     return EXIT_SUCCESS;
 }

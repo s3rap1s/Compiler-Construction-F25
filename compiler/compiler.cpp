@@ -41,8 +41,8 @@ struct Compiler {
     std::unordered_map<std::string, Value*> namedValues;
     std::unordered_map<std::string, Function*> functions;
 
-    SymbolTable* symbolTable;
-    Program& program;
+    const SymbolTable& symbolTable; // NOLINT(*ref*)
+    const Program& program;         // NOLINT(*ref*)
 
     llvm::Type* getLLVMType(const analyzer::TypeInfo& typeInfo) {
         const auto& type = typeInfo.definition;
@@ -52,13 +52,14 @@ struct Compiler {
                               [this](const analyzer::BooleanTypeInfo&) -> llvm::Type* { return builder->getInt1Ty(); },
                               [this, type](const analyzer::ArrayTypeInfo& arrayType) -> llvm::Type* {
                                   llvm::Type* elementType =
-                                      getLLVMType(symbolTable->getTypeInfo(arrayType.element_type));
+                                      getLLVMType(symbolTable.getTypeInfo(arrayType.element_type));
                                   return llvm::ArrayType::get(elementType, arrayType.size);
                               },
                               [this, type](const analyzer::RecordTypeInfo& recordType) -> llvm::Type* {
                                   std::vector<llvm::Type*> fieldTypes;
+                                  fieldTypes.reserve(recordType.fields.size());
                                   for (const auto& [name, typeId] : recordType.fields) {
-                                      fieldTypes.push_back(getLLVMType(symbolTable->getTypeInfo(typeId)));
+                                      fieldTypes.push_back(getLLVMType(symbolTable.getTypeInfo(typeId)));
                                   }
                                   return StructType::get(*context, fieldTypes);
                               },
@@ -70,8 +71,8 @@ struct Compiler {
         if (fromType == toType)
             return value;
 
-        const TypeInfo& fromInfo = symbolTable->getTypeInfo(fromType);
-        const TypeInfo& toInfo = symbolTable->getTypeInfo(toType);
+        const TypeInfo& fromInfo = symbolTable.getTypeInfo(fromType);
+        const TypeInfo& toInfo = symbolTable.getTypeInfo(toType);
 
         if (std::holds_alternative<IntegerTypeInfo>(fromInfo.definition) &&
             std::holds_alternative<RealTypeInfo>(toInfo.definition)) {
@@ -239,6 +240,7 @@ struct Compiler {
                 }
             } else {
                 // Convert to floating point if needed
+
                 if (result->getType()->isIntegerTy()) {
                     result = builder->CreateSIToFP(result, builder->getDoubleTy());
                 }
@@ -278,9 +280,8 @@ struct Compiler {
                     if (sign.sign == UnarySign::Sign::Minus) {
                         if (result->getType()->isIntegerTy()) {
                             return builder->CreateNeg(result, "negtmp");
-                        } else {
-                            return builder->CreateFNeg(result, "fnegtmp");
                         }
+                        return builder->CreateFNeg(result, "fnegtmp");
                     }
                     return result;
                 },
@@ -297,7 +298,7 @@ struct Compiler {
 
         // Load the base value
         Value* current =
-            builder->CreateLoad(getLLVMType(symbolTable->getTypeInfo(primary.variable_type)), base, "loadtmp");
+            builder->CreateLoad(getLLVMType(symbolTable.getTypeInfo(primary.variable_type)), base, "loadtmp");
 
         // Process accessors
         TypeId currentTypeId = primary.variable_type;
@@ -310,34 +311,34 @@ struct Compiler {
                 Value* indexValue = generateExpression(index.value);
 
                 // Get array type info
-                const TypeInfo& typeInfo = symbolTable->getTypeInfo(currentTypeId);
+                const TypeInfo& typeInfo = symbolTable.getTypeInfo(currentTypeId);
                 if (!std::holds_alternative<ArrayTypeInfo>(typeInfo.definition)) {
                     throw CompileError{"Indexing non-array type", index.bracket_span};
                 }
 
-                const ArrayTypeInfo& arrayInfo = std::get<ArrayTypeInfo>(typeInfo.definition);
+                const auto& arrayInfo = std::get<ArrayTypeInfo>(typeInfo.definition);
 
                 // Generate GEP for array access
-                Value* indices[] = {ConstantInt::get(builder->getInt32Ty(), 0), indexValue};
+                std::vector<Value*> indices = {ConstantInt::get(builder->getInt32Ty(), 0), indexValue};
 
                 current = builder->CreateGEP(getLLVMType(typeInfo), current, indices, "arrayidx");
                 current = builder->CreateLoad(
-                    getLLVMType(symbolTable->getTypeInfo(arrayInfo.element_type)), current, "elemload");
+                    getLLVMType(symbolTable.getTypeInfo(arrayInfo.element_type)), current, "elemload");
                 currentTypeId = arrayInfo.element_type;
             } else {
                 const auto& field = std::get<Identifier>(accessor.key);
 
                 // Get record type info
-                const TypeInfo& typeInfo = symbolTable->getTypeInfo(currentTypeId);
+                const TypeInfo& typeInfo = symbolTable.getTypeInfo(currentTypeId);
                 if (!std::holds_alternative<RecordTypeInfo>(typeInfo.definition)) {
                     throw CompileError{"Accessing field of non-record type", field.span};
                 }
 
-                const RecordTypeInfo& recordInfo = std::get<RecordTypeInfo>(typeInfo.definition);
+                const auto& recordInfo = std::get<RecordTypeInfo>(typeInfo.definition);
 
                 // Find field index
                 int fieldIndex = -1;
-                for (size_t i = 0; i < recordInfo.fields.size(); ++i) {
+                for (int i = 0; i < recordInfo.fields.size(); ++i) {
                     if (recordInfo.fields[i].first == field.text) {
                         fieldIndex = i;
                         break;
@@ -349,12 +350,12 @@ struct Compiler {
                 }
 
                 // Generate GEP for field access
-                Value* indices[] = {ConstantInt::get(builder->getInt32Ty(), 0),
-                                    ConstantInt::get(builder->getInt32Ty(), fieldIndex)};
+                std::vector<Value*> indices = {ConstantInt::get(builder->getInt32Ty(), 0),
+                                               ConstantInt::get(builder->getInt32Ty(), fieldIndex)};
 
                 current = builder->CreateGEP(getLLVMType(typeInfo), current, indices, "fieldptr");
                 current = builder->CreateLoad(
-                    getLLVMType(symbolTable->getTypeInfo(recordInfo.fields[fieldIndex].second)), current, "fieldload");
+                    getLLVMType(symbolTable.getTypeInfo(recordInfo.fields[fieldIndex].second)), current, "fieldload");
                 currentTypeId = recordInfo.fields[fieldIndex].second;
             }
         }
@@ -371,6 +372,7 @@ struct Compiler {
 
         // Generate arguments
         std::vector<Value*> args;
+        args.reserve(call.arguments.size());
         for (const auto& arg : call.arguments) {
             args.push_back(generateExpression(arg));
         }
@@ -401,29 +403,29 @@ struct Compiler {
                 const auto& index = std::get<Index>(accessor.key);
                 Value* indexValue = generateExpression(index.value);
 
-                const TypeInfo& typeInfo = symbolTable->getTypeInfo(currentTypeId);
+                const TypeInfo& typeInfo = symbolTable.getTypeInfo(currentTypeId);
                 if (!std::holds_alternative<ArrayTypeInfo>(typeInfo.definition)) {
                     throw CompileError{"Indexing non-array type", index.bracket_span};
                 }
 
-                const ArrayTypeInfo& arrayInfo = std::get<ArrayTypeInfo>(typeInfo.definition);
+                const auto& arrayInfo = std::get<ArrayTypeInfo>(typeInfo.definition);
 
-                Value* indices[] = {ConstantInt::get(builder->getInt32Ty(), 0), indexValue};
+                std::vector<Value*> indices = {ConstantInt::get(builder->getInt32Ty(), 0), indexValue};
 
                 current = builder->CreateGEP(getLLVMType(typeInfo), current, indices, "arrayidx");
                 currentTypeId = arrayInfo.element_type;
             } else {
                 const auto& field = std::get<Identifier>(accessor.key);
 
-                const TypeInfo& typeInfo = symbolTable->getTypeInfo(currentTypeId);
+                const TypeInfo& typeInfo = symbolTable.getTypeInfo(currentTypeId);
                 if (!std::holds_alternative<RecordTypeInfo>(typeInfo.definition)) {
                     throw CompileError{"Accessing field of non-record type", field.span};
                 }
 
-                const RecordTypeInfo& recordInfo = std::get<RecordTypeInfo>(typeInfo.definition);
+                const auto& recordInfo = std::get<RecordTypeInfo>(typeInfo.definition);
 
                 int fieldIndex = -1;
-                for (size_t i = 0; i < recordInfo.fields.size(); ++i) {
+                for (unsigned long i = 0; i < recordInfo.fields.size(); ++i) {
                     if (recordInfo.fields[i].first == field.text) {
                         fieldIndex = i;
                         break;
@@ -434,8 +436,8 @@ struct Compiler {
                     throw CompileError{"No such field in record: " + field.text, field.span};
                 }
 
-                Value* indices[] = {ConstantInt::get(builder->getInt32Ty(), 0),
-                                    ConstantInt::get(builder->getInt32Ty(), fieldIndex)};
+                std::vector<Value*> indices = {ConstantInt::get(builder->getInt32Ty(), 0),
+                                               ConstantInt::get(builder->getInt32Ty(), fieldIndex)};
 
                 current = builder->CreateGEP(getLLVMType(typeInfo), current, indices, "fieldptr");
                 currentTypeId = recordInfo.fields[fieldIndex].second;
@@ -446,7 +448,7 @@ struct Compiler {
     }
 
     void generateGlobalVariableDeclaration(const parser::VariableDeclaration& declaration) {
-        llvm::Type* llvmType = getLLVMType(symbolTable->getTypeInfo(declaration.resolved_type));
+        llvm::Type* llvmType = getLLVMType(symbolTable.getTypeInfo(declaration.resolved_type));
         Constant* initialValue = nullptr;
 
         if (declaration.value) {
@@ -465,7 +467,7 @@ struct Compiler {
     }
 
     void generateLocalVariableDeclaration(const parser::VariableDeclaration& declaration) {
-        llvm::Type* llvmType = getLLVMType(symbolTable->getTypeInfo(declaration.resolved_type));
+        llvm::Type* llvmType = getLLVMType(symbolTable.getTypeInfo(declaration.resolved_type));
 
         Function* currentFunction = builder->GetInsertBlock()->getParent();
         IRBuilder<> allocaBuilder(&currentFunction->getEntryBlock(), currentFunction->getEntryBlock().begin());
@@ -559,12 +561,12 @@ struct Compiler {
         // Declare printf function
         FunctionType* printfType =
             FunctionType::get(builder->getInt32Ty(), {builder->getInt8Ty()->getPointerTo()}, true);
-        auto* printfFunc = cast<Function>(module->getOrInsertFunction("printf", printfType).getCallee());
+        Function* printfFunc = Function::Create(printfType, Function::ExternalLinkage, "printf", module.get());
 
         for (const auto& arg : printStmt.arguments) {
             if (std::holds_alternative<parser::StringLiteral>(arg)) {
                 const auto& str = std::get<parser::StringLiteral>(arg);
-                Value* formatStr = builder->CreateGlobalString(str.value + "\0");
+                Value* formatStr = builder->CreateGlobalStringPtr(str.value);
                 builder->CreateCall(printfFunc, {formatStr});
             } else {
                 const auto& expr = std::get<Expression>(arg);
@@ -573,14 +575,14 @@ struct Compiler {
                 // Create format string based on type
                 Value* formatStr = nullptr;
                 if (value->getType()->isIntegerTy(32)) {
-                    formatStr = builder->CreateGlobalStringPtr("%d\0");
+                    formatStr = builder->CreateGlobalStringPtr("%d\n");
                 } else if (value->getType()->isDoubleTy()) {
-                    formatStr = builder->CreateGlobalStringPtr("%f\0");
+                    formatStr = builder->CreateGlobalStringPtr("%f\n");
                 } else if (value->getType()->isIntegerTy(1)) {
-                    formatStr = builder->CreateGlobalStringPtr("%s\0");
+                    formatStr = builder->CreateGlobalStringPtr("%s\n");
                     // Convert boolean to string
-                    Value* trueStr = builder->CreateGlobalStringPtr("true\0");
-                    Value* falseStr = builder->CreateGlobalStringPtr("false\0");
+                    Value* trueStr = builder->CreateGlobalStringPtr("true");
+                    Value* falseStr = builder->CreateGlobalStringPtr("false");
                     value = builder->CreateSelect(value, trueStr, falseStr);
                 }
 
@@ -611,12 +613,12 @@ struct Compiler {
 
     Function* generateRoutineDeclaration(const parser::RoutineDeclaration& declaration) {
         llvm::Type* returnType = declaration.return_type
-                                     ? getLLVMType(symbolTable->getTypeInfo(declaration.return_type->resolved))
+                                     ? getLLVMType(symbolTable.getTypeInfo(declaration.return_type->resolved))
                                      : builder->getVoidTy();
         std::vector<llvm::Type*> paramTypes;
         paramTypes.reserve(declaration.parameters.size());
         for (const auto& param : declaration.parameters) {
-            paramTypes.push_back(getLLVMType(symbolTable->getTypeInfo(param.resolved_type)));
+            paramTypes.push_back(getLLVMType(symbolTable.getTypeInfo(param.resolved_type)));
         }
         FunctionType* functionType = FunctionType::get(returnType, paramTypes, false);
         Function* function =
@@ -652,15 +654,40 @@ struct Compiler {
         if (declaration.body) {
             if (std::holds_alternative<Block>(*declaration.body)) {
                 generateBlock(std::get<Block>(*declaration.body));
+
+                // Если функция должна возвращать значение, но нет return statement
+                if (!function->getReturnType()->isVoidTy()) {
+                    // Добавляем возврат значения по умолчанию
+                    if (function->getReturnType()->isIntegerTy(32)) {
+                        builder->CreateRet(ConstantInt::get(builder->getInt32Ty(), 0));
+                    } else if (function->getReturnType()->isDoubleTy()) {
+                        builder->CreateRet(ConstantFP::get(builder->getDoubleTy(), 0.0));
+                    } else if (function->getReturnType()->isIntegerTy(1)) {
+                        builder->CreateRet(ConstantInt::get(builder->getInt1Ty(), 0));
+                    } else {
+                        builder->CreateRetVoid();
+                    }
+                }
             } else {
                 // Handle expression body (arrow functions)
                 Value* result = generateExpression(std::get<Expression>(*declaration.body));
                 builder->CreateRet(result);
             }
+        } else {
+            // Для функций без тела - возврат по умолчанию
+            if (!function->getReturnType()->isVoidTy()) {
+                builder->CreateRet(Constant::getNullValue(function->getReturnType()));
+            } else {
+                builder->CreateRetVoid();
+            }
         }
 
         // Verify function
-        verifyFunction(*function);
+        std::string verification_error;
+        llvm::raw_string_ostream error_stream(verification_error);
+        if (verifyFunction(*function, &error_stream)) {
+            throw CompileError{"Function verification failed: " + verification_error, declaration.name.span};
+        }
 
         // Restore named values
         namedValues = std::move(oldNamedValues);
@@ -692,20 +719,20 @@ struct Compiler {
     }
 
   public:
-    explicit Compiler(Program& ast, SymbolTable* symbolTable) : symbolTable{symbolTable}, program{ast} {}
+    explicit Compiler(const Program& ast, const SymbolTable& symbolTable) : symbolTable{symbolTable}, program{ast} {}
 
-    std::optional<CompileError> compile() {
+    std::expected<std::unique_ptr<llvm::Module>, CompileError> compile() {
         try {
             generateCode();
-            return std::nullopt;
+            return std::move(module);
         } catch (const CompileError& error) {
-            return error;
+            return std::unexpected{error};
         }
     }
 };
 // NOLINTEND(*recursion*)
 
-std::optional<CompileError> compile(Program& ast, SymbolTable* symbolTable) {
+std::expected<std::unique_ptr<llvm::Module>, CompileError> compile(const Program& ast, const SymbolTable& symbolTable) {
     Compiler compiler{ast, symbolTable};
     return compiler.compile();
 }

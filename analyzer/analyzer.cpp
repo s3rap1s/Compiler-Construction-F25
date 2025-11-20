@@ -5,7 +5,11 @@
 #include "parser/ast.hpp"
 #include "utils.hpp"
 
+<<<<<<< HEAD
 #include <algorithm>
+=======
+#include <expected>
+>>>>>>> 1869f40 (wip)
 #include <format>
 #include <memory>
 #include <optional>
@@ -548,18 +552,18 @@ class SemanticAnalyzer {
     explicit SemanticAnalyzer(Program& program, std::string_view entry_point)
         : program{program}, entry_point{entry_point} {}
 
-    std::optional<SemanticError> analyze() {
+    std::expected<SymbolTable, SemanticError> analyze() {
         try {
             checkProgram();
         } catch (const SemanticError& error) {
-            return error;
+            return std::unexpected<SemanticError>(error);
         }
         optimizeProgram(); // should never throw SemanticError
-        return std::nullopt;
+        return std::move(table);
     }
 };
 
-std::optional<SemanticError> analyze(Program& ast, std::string_view entry_point) {
+std::expected<SymbolTable, SemanticError> analyze(Program& ast, std::string_view entry_point) {
     SemanticAnalyzer analyzer{ast, entry_point};
     return analyzer.analyze();
 }
