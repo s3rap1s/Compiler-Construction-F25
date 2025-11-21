@@ -267,6 +267,7 @@ struct PrintStatement {
 };
 
 struct ReturnStatement {
+    Span return_span;
     std::optional<Expression> value;
 };
 
@@ -289,15 +290,11 @@ struct ParameterDeclaration {
 };
 
 struct RoutineDeclaration {
-    struct ReturnType {
-        Type type;
-        TypeId resolved = -1;
-    };
-
     Identifier name;
     std::vector<ParameterDeclaration> parameters;
     std::optional<std::variant<Block, Expression>> body;
-    std::optional<ReturnType> return_type;
+    std::optional<Type> return_type;
+    std::optional<TypeId> resolved_return_type = -1;
 };
 
 struct TypeDeclaration {

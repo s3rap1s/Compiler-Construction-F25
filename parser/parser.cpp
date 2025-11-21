@@ -666,13 +666,13 @@ class Parser {
     }
 
     ParsingExpected<ReturnStatement> parseReturnStatement() {
-        BIND_VOID(consumeKeyword<SyntaxPart::Return>());
+        BIND(kw, consumeKeyword<SyntaxPart::Return>());
 
         std::optional<Expression> value;
         if (!assertSeparator()) {
             BIND_SET(value, parseExpression());
         }
-        return ReturnStatement{std::move(value)};
+        return ReturnStatement{.return_span = kw.span, .value = std::move(value)};
     }
 
   public:

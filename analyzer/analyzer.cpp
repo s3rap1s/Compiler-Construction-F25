@@ -38,6 +38,23 @@ class SemanticAnalyzer {
     std::string_view entry_point;
     SymbolTable table;
 
+    const std::string& getTypeName(TypeId type) const {
+        return table.getTypeInfo(type).name;
+    }
+
+    void throwTypeConversionError(TypeId from, TypeId to, Span error_span) const {
+        throw SemanticError{"Type '" + getTypeName(from) + "' is not convertible to '" + getTypeName(to) + "'",
+                            error_span};
+    }
+
+    void
+    throwWrongOperandTypesError(TypeId first, TypeId second, std::string_view operation_type, Span error_span) const {
+        std::string error = "Invalid types '" + getTypeName(first) + "' and '" + getTypeName(second) + "' for a ";
+        error += operation_type;
+        error += " operation";
+        throw SemanticError{std::move(error), error_span};
+    }
+
     TypeId checkExpression(Expression& expr) {
         TypeId last_type = checkBooleanExpression(expr.first);
         if (expr.rest.empty())
@@ -45,12 +62,8 @@ class SemanticAnalyzer {
 
         for (auto& [_, operand] : expr.rest) {
             const TypeId operand_type = checkBooleanExpression(operand);
-            if (last_type != table.BooleanTypeId || operand_type != table.BooleanTypeId) {
-                const TypeInfo& info1 = table.getTypeInfo(last_type);
-                const TypeInfo& info2 = table.getTypeInfo(operand_type);
-                throw SemanticError{"Invalid types '" + info1.name + "' and '" + info2.name + "' for boolean operation",
-                                    getSpan(expr)};
-            }
+            if (last_type != table.BooleanTypeId || operand_type != table.BooleanTypeId)
+                throwWrongOperandTypesError(last_type, operand_type, "boolean", getSpan(expr.first) | getSpan(operand));
             last_type = table.BooleanTypeId;
         }
         return expr.type = last_type;
@@ -68,10 +81,8 @@ class SemanticAnalyzer {
             return relation.type = first;
         TypeId second = checkNumberExpression(relation.second->next_operand);
         if (!areForNumericOperation(first, second)) {
-            const TypeInfo& info1 = table.getTypeInfo(first);
-            const TypeInfo& info2 = table.getTypeInfo(second);
-            throw SemanticError{"Invalid types '" + info1.name + "' and '" + info2.name + "' for numeric operation",
-                                getSpan(relation)};
+            throwWrongOperandTypesError(
+                first, second, "numeric", getSpan(relation.first) | getSpan(relation.second->next_operand));
         }
         return relation.type = table.BooleanTypeId;
     }
@@ -79,7 +90,7 @@ class SemanticAnalyzer {
     TypeId checkNotExpression(NotExpression& not_expr) {
         TypeId type = checkPrimary(not_expr.operand);
         if (type != table.IntegerTypeId && type != table.BooleanTypeId) {
-            throw SemanticError{"Invalid operand type '" + table.getTypeInfo(type).name + "' for numeric operation",
+            throw SemanticError{"Invalid operand type '" + std::string{getTypeName(type)} + "' for 'not' operation",
                                 not_expr.not_span};
         }
         return table.BooleanTypeId;
@@ -90,16 +101,12 @@ class SemanticAnalyzer {
         for (auto& [_, operand, operation_type] : num_expr.rest) {
             const TypeId operand_type = checkSummand(operand);
             if (!areForNumericOperation(last_type, operand_type)) {
-                const TypeInfo& info1 = table.getTypeInfo(last_type);
-                const TypeInfo& info2 = table.getTypeInfo(operand_type);
-                throw SemanticError{"Invalid types '" + info1.name + "' and '" + info2.name + "' for numeric operation",
-                                    getSpan(num_expr)};
+                throwWrongOperandTypesError(
+                    last_type, operand_type, "numeric", getSpan(num_expr.first) | getSpan(operand));
             }
-            if (last_type == table.RealTypeId || operand_type == table.RealTypeId)
-                operation_type = table.RealTypeId;
-            else
-                operation_type = table.IntegerTypeId;
-            last_type = operand_type;
+            last_type = operation_type = (last_type == table.RealTypeId || operand_type == table.RealTypeId)
+                                             ? table.RealTypeId
+                                             : table.IntegerTypeId;
         }
         return num_expr.type = last_type;
     }
@@ -110,16 +117,12 @@ class SemanticAnalyzer {
             const TypeId operand_type = checkPrimary(operand);
             if (!areForNumericOperation(last_type, operand_type) ||
                 (op == Summand::Operator::Modulo && operand_type == table.RealTypeId)) {
-                const TypeInfo& info1 = table.getTypeInfo(last_type);
-                const TypeInfo& info2 = table.getTypeInfo(operand_type);
-                throw SemanticError{"Invalid types '" + info1.name + "' and '" + info2.name + "' for operation",
-                                    getSpan(summand)};
+                throwWrongOperandTypesError(
+                    last_type, operand_type, "numeric", getSpan(summand.first) | getSpan(operand));
             }
-            if (last_type == table.RealTypeId || operand_type == table.RealTypeId)
-                operation_type = table.RealTypeId;
-            else
-                operation_type = table.IntegerTypeId;
-            last_type = operand_type;
+            last_type = operation_type = (last_type == table.RealTypeId || operand_type == table.RealTypeId)
+                                             ? table.RealTypeId
+                                             : table.IntegerTypeId;
         }
         return summand.type = last_type;
     }
@@ -218,11 +221,8 @@ class SemanticAnalyzer {
 
         for (auto [param_type, arg] : std::views::zip(routine_info.parameters, call.arguments)) {
             checkExpression(arg);
-            if (!table.isConvertibleTo(arg.type, param_type)) {
-                throw SemanticError{"Type '" + table.getTypeInfo(arg.type).name + "' is not convertible to '" +
-                                        table.getTypeInfo(param_type).name + "'",
-                                    getSpan(arg)};
-            }
+            if (!table.isConvertibleTo(arg.type, param_type))
+                throwTypeConversionError(arg.type, param_type, getSpan(arg));
         }
 
         return call.type = routine_info.return_type;
@@ -314,12 +314,8 @@ class SemanticAnalyzer {
         if (assignment.target.accessors.empty() && table.getForLoopVariables().contains(target_var.text))
             throw SemanticError{"Cannot assign to for loop variable: " + target_var.text, target_var.span};
 
-        if (!table.isConvertibleTo(expr_type, target_type)) {
-            const TypeInfo& target_info = table.getTypeInfo(target_type);
-            const TypeInfo& expr_info = table.getTypeInfo(expr_type);
-            throw SemanticError{"Type '" + expr_info.name + "' is not convertible to '" + target_info.name + "'",
-                                getSpan(assignment.expression)};
-        }
+        if (!table.isConvertibleTo(expr_type, target_type))
+            throwTypeConversionError(expr_type, target_type, getSpan(assignment.expression));
     }
 
     void checkForStatement(ForStatement& for_stmt) {
@@ -362,30 +358,19 @@ class SemanticAnalyzer {
         table.popScope(for_stmt.body);
     }
 
+    // @return Whether the last statement is return
     bool checkRoutineDeclaration(RoutineDeclaration& routine) {
         for (ParameterDeclaration& param : routine.parameters)
             param.resolved_type = checkType(param.type);
         if (routine.return_type)
-            routine.return_type->resolved = checkType(routine.return_type->type);
+            routine.resolved_return_type = checkType(*routine.return_type);
 
         if (!routine.body)
             return false;
 
         if (auto* expr = std::get_if<Expression>(&*routine.body)) {
-            if (!routine.return_type)
-                throw SemanticError{"Arrow function must specify return type", getSpan(*expr)};
-
-            TypeId expr_type = checkExpression(*expr);
-            if (!table.isConvertibleTo(expr_type, routine.return_type->resolved)) {
-                const TypeInfo& return_type_info = table.getTypeInfo(routine.return_type->resolved);
-                const TypeInfo& expr_info = table.getTypeInfo(expr_type);
-                throw SemanticError{"Type '" + expr_info.name + "' is not convertible to '" + return_type_info.name +
-                                        "'",
-                                    getSpan(*expr)};
-            }
-
             Block block;
-            block.emplace_back(ReturnStatement{.value = std::move(*expr)});
+            block.emplace_back(ReturnStatement{.return_span = routine.name.span, .value = std::move(*expr)});
             *routine.body = std::move(block);
         }
 
@@ -394,21 +379,100 @@ class SemanticAnalyzer {
         for (const ParameterDeclaration& param : routine.parameters)
             table.addLocalVariable(param.name, param.resolved_type);
         checkBlock(body);
+        if (routine.return_type)
+            checkReturnType(routine, body);
+        else {
+            DeducingReturnTypeState deducing_state;
+            deduceReturnType(routine, body, deducing_state);
+            if (deducing_state.return_type != static_cast<TypeId>(-1))
+                routine.resolved_return_type = deducing_state.return_type;
+            else
+                routine.resolved_return_type = std::nullopt;
+        }
+        table.popScope(body);
 
         bool last_return = false;
         if (!body.empty())
             last_return = std::holds_alternative<ReturnStatement>(body.back());
         if (routine.return_type && !last_return)
             throw SemanticError{"Non-void function must have return as the last statement", routine.name.span};
-
-        table.popScope(body);
         return last_return;
+    }
+
+    void checkReturnType(RoutineDeclaration& routine, Block& body) {
+        for (Statement& statement : body) {
+            std::visit(overloaded{
+                           [&](ReturnStatement& return_stmt) {
+                               if (!return_stmt.value) {
+                                   throw SemanticError{"Function '" + routine.name.text + "' must return a value",
+                                                       return_stmt.return_span};
+                               }
+                               if (!table.isConvertibleTo(return_stmt.value->type, *routine.resolved_return_type)) {
+                                   throwTypeConversionError(
+                                       return_stmt.value->type, *routine.resolved_return_type, return_stmt.return_span);
+                               }
+                           },
+                           [&](WhileStatement& while_loop) { checkReturnType(routine, while_loop.body); },
+                           [&](ForStatement& for_loop) { checkReturnType(routine, for_loop.body); },
+                           [&](IfStatement& if_stmt) {
+                               checkReturnType(routine, if_stmt.true_branch);
+                               if (if_stmt.false_branch)
+                                   checkReturnType(routine, *if_stmt.false_branch);
+                           },
+                           [](const auto&) {},
+                       },
+                       statement);
+        }
+    }
+
+    struct DeducingReturnTypeState {
+        TypeId return_type = -1;
+        bool seen_empty_return = false;
+    };
+
+    void deduceReturnType(RoutineDeclaration& routine, Block& body, DeducingReturnTypeState& state) {
+        for (Statement& statement : body) {
+            std::visit(
+                overloaded{
+                    [&](ReturnStatement& return_stmt) {
+                        if (return_stmt.value) {
+                            if (state.seen_empty_return)
+                                throw SemanticError{"Function returns a value here but an empty return was seen earlier",
+                                                    return_stmt.return_span};
+                            if (state.return_type == static_cast<TypeId>(-1)) // deduce type first time here
+                                state.return_type = return_stmt.value->type;
+                            else if (state.return_type != return_stmt.value->type) {
+                                throw SemanticError{"Function returns '" + getTypeName(return_stmt.value->type) +
+                                                        "' here but earlier returns '" +
+                                                        getTypeName(state.return_type) + "'",
+                                                    return_stmt.return_span};
+                            }
+                        } else {
+                            state.seen_empty_return = true;
+                            if (state.return_type != static_cast<TypeId>(-1)) {
+                                throw SemanticError{"Function returns nothing here but return type was deduced as '" +
+                                                        getTypeName(state.return_type) + "' earlier",
+                                                    return_stmt.return_span};
+                            }
+                        }
+                    },
+                    [&](WhileStatement& while_loop) { deduceReturnType(routine, while_loop.body, state); },
+                    [&](ForStatement& for_loop) { deduceReturnType(routine, for_loop.body, state); },
+                    [&](IfStatement& if_stmt) {
+                        deduceReturnType(routine, if_stmt.true_branch, state);
+                        if (if_stmt.false_branch)
+                            deduceReturnType(routine, *if_stmt.false_branch, state);
+                    },
+                    [](const auto&) {},
+                },
+                statement);
+        }
     }
 
     void checkForwardDeclarations() {
         for (const auto& [name, routine_info] : table.getRoutines()) {
             if (!routine_info.defined) {
-                throw SemanticError{"Forward declared routine \"" + name + "\" is never defined",
+                throw SemanticError{"Forward declared routine '" + name + "' is never defined",
                                     routine_info.span_of_declaration};
             }
         }
@@ -511,10 +575,8 @@ class SemanticAnalyzer {
                                } else {
                                    bool last_return = checkRoutineDeclaration(routine);
                                    bool is_defined = routine.body.has_value();
-                                   const auto& return_type = routine.return_type;
                                    RoutineInfo info{.parameters = {},
-                                                    .return_type = return_type ? std::optional{return_type->resolved}
-                                                                               : std::nullopt,
+                                                    .return_type = routine.resolved_return_type,
                                                     .span_of_declaration = routine.name.span,
                                                     .last_return = last_return,
                                                     .defined = is_defined};

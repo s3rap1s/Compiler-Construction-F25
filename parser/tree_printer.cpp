@@ -78,7 +78,7 @@ class TreePrinter {
 
         if (decl.return_type) {
             out << " : ";
-            printDeduced(decl.return_type->type);
+            printDeduced(*decl.return_type);
         }
 
         if (decl.body) {

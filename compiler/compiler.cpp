@@ -748,8 +748,8 @@ struct Compiler {
     }
 
     Function* generateRoutineDeclaration(const parser::RoutineDeclaration& declaration) {
-        llvm::Type* returnType = declaration.return_type
-                                     ? getLLVMType(symbolTable.getTypeInfo(declaration.return_type->resolved))
+        llvm::Type* returnType = declaration.resolved_return_type
+                                     ? getLLVMType(symbolTable.getTypeInfo(*declaration.resolved_return_type))
                                      : builder->getVoidTy();
         std::vector<llvm::Type*> paramTypes;
         paramTypes.reserve(declaration.parameters.size());
