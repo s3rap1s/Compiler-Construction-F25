@@ -14,9 +14,9 @@ routine sideff(ps:Points) is
     return 1
 end
 
-routine main() is
-    var c: Container
+var c: Container
 
+routine main() is
     print c.points[1].x
     c.points[1].x := 1
     print c.points[1].x

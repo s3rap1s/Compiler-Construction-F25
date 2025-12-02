@@ -298,7 +298,7 @@ struct CodeGenerator {
             primary);
     }
 
-    Value* generateModifiablePrimary(const parser::ModifiablePrimary& primary) {
+    Value* generateModifiablePrimary(const parser::ModifiablePrimary& primary) { // NOLINT(*complexity*)
         Value* base = namedValues[primary.variable.text];
         if (!base) {
             throw CodegenError{"Undeclared variable: " + primary.variable.text, primary.variable.span};
@@ -328,6 +328,13 @@ struct CodeGenerator {
                 const auto& field = std::get<Identifier>(accessor.key);
 
                 const TypeInfo& typeInfo = symbolTable.getTypeInfo(currentTypeId);
+                if (std::holds_alternative<ArrayTypeInfo>(typeInfo.definition)) {
+                    if (field.text == "size") {
+                        const auto& arrayInfo = std::get<ArrayTypeInfo>(typeInfo.definition);
+                        return ConstantInt::get(builder->getInt32Ty(), arrayInfo.size);
+                    }
+                    throw CodegenError{"No such field in array: " + field.text, field.span};
+                }
                 if (!std::holds_alternative<RecordTypeInfo>(typeInfo.definition)) {
                     throw CodegenError{"Accessing field of non-record type", field.span};
                 }
@@ -371,6 +378,9 @@ struct CodeGenerator {
             args.push_back(generateExpression(arg));
         }
 
+        if (function->getReturnType()->isVoidTy()) {
+            return builder->CreateCall(function, args);
+        }
         return builder->CreateCall(function, args, !args.empty() ? "calltmp" : "");
     }
 
@@ -382,7 +392,7 @@ struct CodeGenerator {
         builder->CreateStore(rhs, lhs);
     }
 
-    Value* generateModifiablePrimaryAddress(const parser::ModifiablePrimary& primary) {
+    Value* generateModifiablePrimaryAddress(const parser::ModifiablePrimary& primary) { // NOLINT(*complexity*)
         Value* base = namedValues[primary.variable.text];
         if (!base) {
             throw CodegenError{"Undeclared variable: " + primary.variable.text, primary.variable.span};
@@ -411,6 +421,13 @@ struct CodeGenerator {
                 const auto& field = std::get<Identifier>(accessor.key);
 
                 const TypeInfo& typeInfo = symbolTable.getTypeInfo(currentTypeId);
+                if (std::holds_alternative<ArrayTypeInfo>(typeInfo.definition)) {
+                    if (field.text == "size") {
+                        const auto& arrayInfo = std::get<ArrayTypeInfo>(typeInfo.definition);
+                        return ConstantInt::get(builder->getInt32Ty(), arrayInfo.size);
+                    }
+                    throw CodegenError{"No such field in array: " + field.text, field.span};
+                }
                 if (!std::holds_alternative<RecordTypeInfo>(typeInfo.definition)) {
                     throw CodegenError{"Accessing field of non-record type", field.span};
                 }
@@ -779,8 +796,7 @@ struct CodeGenerator {
         BasicBlock* block = BasicBlock::Create(*context, "entry", function);
         builder->SetInsertPoint(block);
 
-        auto oldNamedValues = std::move(namedValues);
-        namedValues.clear();
+        auto oldNamedValues = namedValues;
 
         for (auto& arg : function->args()) {
             AllocaInst* alloca = builder->CreateAlloca(arg.getType(), nullptr, arg.getName());
