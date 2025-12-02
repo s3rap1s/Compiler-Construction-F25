@@ -9,7 +9,11 @@ type Container is record
     var points: Points
 end
 
+var a: integer is 10
+
 routine main() : integer is
+    a := 20
+    print a
     var c: Container
     c.points[1].x := 1
     c.points[1].y := 2
@@ -19,5 +23,5 @@ routine main() : integer is
     print c.points[1].y
     print c.points[2].x
     print c.points[2].y
-    print c
+    return 1
 end
