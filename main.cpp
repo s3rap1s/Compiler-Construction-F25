@@ -152,7 +152,8 @@ int main(int argc, const char** argv) {
     }
     // print_tree(*ast);
 
-    std::fstream output_file{"output.ll", output_file.out};
+    std::string output_filename = "output.ll";
+    std::fstream output_file{output_filename, output_file.out};
     if (!output_file) {
         logErrorLn("Failed to open {} for writing", filename);
         return EXIT_FAILURE;
@@ -162,6 +163,7 @@ int main(int argc, const char** argv) {
         handleCodegenError(gen_result.error(), filename, program_text);
         return EXIT_FAILURE;
     }
+    logErrorLn("Output saved to {}", output_filename);
 
     return EXIT_SUCCESS;
 }

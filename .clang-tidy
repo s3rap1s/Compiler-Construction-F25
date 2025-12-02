@@ -31,8 +31,7 @@ Checks: "*,
         -bugprone-easily-swappable-parameters,
         -misc-non-private-member-variables-in-classes,
         -llvm-header-guard,
-
-        -misc-include-cleaner"
+        -misc-no-recursion"
 CheckOptions:
   cppcoreguidelines-pro-type-member-init.IgnoreArrays: true
   readability-implicit-bool-conversion.AllowPointerConditions: true

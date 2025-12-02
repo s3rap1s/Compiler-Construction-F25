@@ -1,5 +1,6 @@
 #include "analyzer.hpp"
 
+#include "analyzer/constexpr_calc.hpp"
 #include "analyzer/semantic_error.hpp"
 #include "analyzer/symbol_table.hpp"
 #include "parser/ast.hpp"
@@ -242,13 +243,7 @@ class SemanticAnalyzer {
                                   table.ensureTypeExists(type_name);
                                   table.markTypeUsed(type_name.text);
                               },
-                              [this](ArrayType& array) {
-                                  array.resolved_element_type = checkType(*array.element_type);
-                                  if (array.size)
-                                      checkExpression(*array.size);
-                                  // TODO: compute size
-                                  array.computed_size = 100; // NOLINT
-                              },
+                              [this](ArrayType& array) { checkArrayType(array); },
                               [this](RecordType& record) {
                                   for (VariableDeclaration& field : record.fields) {
                                       checkVariableDeclaration(field);
@@ -257,6 +252,25 @@ class SemanticAnalyzer {
                               [](const auto&) {}},
                    type);
         return table.resolveType(type);
+    }
+
+    void checkArrayType(ArrayType& array) {
+        array.resolved_element_type = checkType(*array.element_type);
+        if (array.size) {
+            checkExpression(*array.size);
+            if (array.size->type != SymbolTable::IntegerTypeId)
+                throw SemanticError{"Array size must be an integer", getSpan(*array.size)};
+            std::optional<ConstexprValue> computed_size = computeConstexpr(*array.size);
+            if (!computed_size)
+                throw SemanticError{"Array size must be a constant expression", getSpan(*array.size)};
+            auto* integer = std::get_if<IntegerValue>(&*computed_size);
+            if (!integer)
+                throw SemanticError{"Array size must be an integer", getSpan(*array.size)};
+            if (integer->value <= 0)
+                throw SemanticError{std::format("Array size should be positive, given {}", integer->value),
+                                    getSpan(*array.size)};
+            array.computed_size = integer->value;
+        }
     }
 
     void checkBlock(Block& block) {
@@ -432,40 +446,42 @@ class SemanticAnalyzer {
 
     void deduceReturnType(RoutineDeclaration& routine, Block& body, DeducingReturnTypeState& state) {
         for (Statement& statement : body) {
-            std::visit(
-                overloaded{
-                    [&](ReturnStatement& return_stmt) {
-                        if (return_stmt.value) {
-                            if (state.seen_empty_return)
-                                throw SemanticError{"Function returns a value here but an empty return was seen earlier",
-                                                    return_stmt.return_span};
-                            if (state.return_type == static_cast<TypeId>(-1)) // deduce type first time here
-                                state.return_type = return_stmt.value->type;
-                            else if (state.return_type != return_stmt.value->type) {
-                                throw SemanticError{"Function returns '" + getTypeName(return_stmt.value->type) +
-                                                        "' here but earlier returns '" +
-                                                        getTypeName(state.return_type) + "'",
-                                                    return_stmt.return_span};
-                            }
-                        } else {
-                            state.seen_empty_return = true;
-                            if (state.return_type != static_cast<TypeId>(-1)) {
-                                throw SemanticError{"Function returns nothing here but return type was deduced as '" +
-                                                        getTypeName(state.return_type) + "' earlier",
-                                                    return_stmt.return_span};
-                            }
-                        }
-                    },
-                    [&](WhileStatement& while_loop) { deduceReturnType(routine, while_loop.body, state); },
-                    [&](ForStatement& for_loop) { deduceReturnType(routine, for_loop.body, state); },
-                    [&](IfStatement& if_stmt) {
-                        deduceReturnType(routine, if_stmt.true_branch, state);
-                        if (if_stmt.false_branch)
-                            deduceReturnType(routine, *if_stmt.false_branch, state);
-                    },
-                    [](const auto&) {},
-                },
-                statement);
+            std::visit(overloaded{
+                           [&](ReturnStatement& return_stmt) {
+                               if (return_stmt.value) {
+                                   if (state.seen_empty_return) {
+                                       throw SemanticError{
+                                           "Function returns a value here but an empty return was seen earlier",
+                                           return_stmt.return_span};
+                                   }
+                                   if (state.return_type == static_cast<TypeId>(-1)) // deduce type first time here
+                                       state.return_type = return_stmt.value->type;
+                                   else if (state.return_type != return_stmt.value->type) {
+                                       throw SemanticError{"Function returns '" + getTypeName(return_stmt.value->type) +
+                                                               "' here but earlier returns '" +
+                                                               getTypeName(state.return_type) + "'",
+                                                           return_stmt.return_span};
+                                   }
+                               } else {
+                                   state.seen_empty_return = true;
+                                   if (state.return_type != static_cast<TypeId>(-1)) {
+                                       throw SemanticError{
+                                           "Function returns nothing here but return type was deduced as '" +
+                                               getTypeName(state.return_type) + "' earlier",
+                                           return_stmt.return_span};
+                                   }
+                               }
+                           },
+                           [&](WhileStatement& while_loop) { deduceReturnType(routine, while_loop.body, state); },
+                           [&](ForStatement& for_loop) { deduceReturnType(routine, for_loop.body, state); },
+                           [&](IfStatement& if_stmt) {
+                               deduceReturnType(routine, if_stmt.true_branch, state);
+                               if (if_stmt.false_branch)
+                                   deduceReturnType(routine, *if_stmt.false_branch, state);
+                           },
+                           [](const auto&) {},
+                       },
+                       statement);
         }
     }
 

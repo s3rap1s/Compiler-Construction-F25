@@ -32,6 +32,7 @@ add_executable(main
 
     analyzer/analyzer.cpp
     analyzer/symbol_table.cpp
+    analyzer/constexpr_calc.cpp
 
     codegen/codegen.cpp
 
