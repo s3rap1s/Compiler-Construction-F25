@@ -156,8 +156,10 @@ TypeId SymbolTable::resolveType(const Type& type) {
 }
 
 ArrayTypeInfo SymbolTable::createArrayTypeInfo(const parser::ArrayType& type) {
-    assert(type.computed_size != static_cast<std::size_t>(-1) && "Size of the array was not computed");
-    ArrayTypeInfo info{.size = type.computed_size, .element_type = resolveType(*type.element_type)};
+    std::size_t size = type.computed_size;
+    if (size == static_cast<std::size_t>(-1))
+        size = 0;
+    ArrayTypeInfo info{.size = size, .element_type = resolveType(*type.element_type)};
     return info;
 }
 
