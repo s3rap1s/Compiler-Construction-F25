@@ -182,7 +182,10 @@ bool SymbolTable::isConvertibleTo(TypeId from, TypeId to) const {
     const TypeInfo& to_info = getTypeInfo(to);
     return std::visit(overloaded{
                           [from, to](const RecordTypeInfo&, const RecordTypeInfo&) { return from == to; },
-                          [from, to](const ArrayTypeInfo&, const ArrayTypeInfo&) { return from == to; },
+                          [](const ArrayTypeInfo& arr1, const ArrayTypeInfo& arr2) {
+                              return arr1.element_type == arr2.element_type &&
+                                     (arr1.size == arr2.size || arr2.size == 0);
+                          },
                           [](IntegerTypeInfo, RealTypeInfo) { return true; },
                           [](IntegerTypeInfo, BooleanTypeInfo) { return true; },
                           [](RealTypeInfo, IntegerTypeInfo) { return true; },

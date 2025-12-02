@@ -4,7 +4,7 @@ end
 
 routine sqr(x : integer) => x * x
 
-routine changeArr(arr : array[] integer) is
+routine changeArr(arr : array[1] integer) is
     arr[1] := 20
 end
 

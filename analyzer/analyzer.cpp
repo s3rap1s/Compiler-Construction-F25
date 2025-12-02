@@ -373,12 +373,16 @@ class SemanticAnalyzer {
     }
 
     // @return Whether the last statement is return
-    bool checkRoutineDeclaration(RoutineDeclaration& routine) {
+    void checkRoutineDeclaration(RoutineDeclaration& routine) {
         for (ParameterDeclaration& param : routine.parameters)
             param.resolved_type = checkType(param.type);
         if (routine.return_type)
             routine.resolved_return_type = checkType(*routine.return_type);
+        if (!routine.body && !routine.return_type)
+            routine.resolved_return_type = std::nullopt;
+    }
 
+    bool checkRoutineDefinition(RoutineDeclaration& routine) {
         if (!routine.body)
             return false;
 
@@ -444,44 +448,47 @@ class SemanticAnalyzer {
         bool seen_empty_return = false;
     };
 
-    void deduceReturnType(RoutineDeclaration& routine, Block& body, DeducingReturnTypeState& state) {
+    void
+    deduceReturnType(RoutineDeclaration& routine, Block& body, DeducingReturnTypeState& state) { // NOLINT(*complexity)
         for (Statement& statement : body) {
-            std::visit(overloaded{
-                           [&](ReturnStatement& return_stmt) {
-                               if (return_stmt.value) {
-                                   if (state.seen_empty_return) {
-                                       throw SemanticError{
-                                           "Function returns a value here but an empty return was seen earlier",
-                                           return_stmt.return_span};
-                                   }
-                                   if (state.return_type == static_cast<TypeId>(-1)) // deduce type first time here
-                                       state.return_type = return_stmt.value->type;
-                                   else if (state.return_type != return_stmt.value->type) {
-                                       throw SemanticError{"Function returns '" + getTypeName(return_stmt.value->type) +
-                                                               "' here but earlier returns '" +
-                                                               getTypeName(state.return_type) + "'",
-                                                           return_stmt.return_span};
-                                   }
-                               } else {
-                                   state.seen_empty_return = true;
-                                   if (state.return_type != static_cast<TypeId>(-1)) {
-                                       throw SemanticError{
-                                           "Function returns nothing here but return type was deduced as '" +
-                                               getTypeName(state.return_type) + "' earlier",
-                                           return_stmt.return_span};
-                                   }
-                               }
-                           },
-                           [&](WhileStatement& while_loop) { deduceReturnType(routine, while_loop.body, state); },
-                           [&](ForStatement& for_loop) { deduceReturnType(routine, for_loop.body, state); },
-                           [&](IfStatement& if_stmt) {
-                               deduceReturnType(routine, if_stmt.true_branch, state);
-                               if (if_stmt.false_branch)
-                                   deduceReturnType(routine, *if_stmt.false_branch, state);
-                           },
-                           [](const auto&) {},
-                       },
-                       statement);
+            std::visit(
+                overloaded{
+                    [&](ReturnStatement& return_stmt) {
+                        if (return_stmt.value) {
+                            if (state.seen_empty_return) {
+                                throw SemanticError{
+                                    "Function returns a value here but an empty return was seen earlier",
+                                    return_stmt.return_span};
+                            }
+                            if (state.return_type == static_cast<TypeId>(-1)) { // deduce type first time here
+                                if (return_stmt.value->type == static_cast<TypeId>(-1))
+                                    throw SemanticError{"Cannot deduce return type here", getSpan(*return_stmt.value)};
+                                state.return_type = return_stmt.value->type;
+                            } else if (state.return_type != return_stmt.value->type) {
+                                throw SemanticError{"Function returns '" + getTypeName(return_stmt.value->type) +
+                                                        "' here but earlier returns '" +
+                                                        getTypeName(state.return_type) + "'",
+                                                    return_stmt.return_span};
+                            }
+                        } else {
+                            state.seen_empty_return = true;
+                            if (state.return_type != static_cast<TypeId>(-1)) {
+                                throw SemanticError{"Function returns nothing here but return type was deduced as '" +
+                                                        getTypeName(state.return_type) + "' earlier",
+                                                    return_stmt.return_span};
+                            }
+                        }
+                    },
+                    [&](WhileStatement& while_loop) { deduceReturnType(routine, while_loop.body, state); },
+                    [&](ForStatement& for_loop) { deduceReturnType(routine, for_loop.body, state); },
+                    [&](IfStatement& if_stmt) {
+                        deduceReturnType(routine, if_stmt.true_branch, state);
+                        if (if_stmt.false_branch)
+                            deduceReturnType(routine, *if_stmt.false_branch, state);
+                    },
+                    [](const auto&) {},
+                },
+                statement);
         }
     }
 
@@ -587,18 +594,20 @@ class SemanticAnalyzer {
                                                            routine.name.span};
                                    if (routine.body)
                                        it->second.defined = true;
-                                   it->second.last_return = checkRoutineDeclaration(routine);
+                                   it->second.last_return = checkRoutineDefinition(routine);
                                } else {
-                                   bool last_return = checkRoutineDeclaration(routine);
+                                   checkRoutineDeclaration(routine);
                                    bool is_defined = routine.body.has_value();
                                    RoutineInfo info{.parameters = {},
                                                     .return_type = routine.resolved_return_type,
                                                     .span_of_declaration = routine.name.span,
-                                                    .last_return = last_return,
+                                                    .last_return = false,
                                                     .defined = is_defined};
                                    for (const ParameterDeclaration& param : routine.parameters)
                                        info.parameters.push_back(param.resolved_type);
-                                   table.getRoutines().emplace(routine.name.text, std::move(info));
+                                   auto [it, _] = table.getRoutines().emplace(routine.name.text, std::move(info));
+                                   bool last_return = checkRoutineDefinition(routine);
+                                   it->second.last_return = last_return;
                                }
                            },
                        },
