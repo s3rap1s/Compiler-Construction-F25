@@ -86,17 +86,21 @@ struct Compiler {
             std::holds_alternative<RealTypeInfo>(toInfo.definition)) {
             return builder->CreateSIToFP(value, builder->getDoubleTy(), "casttmp");
         }
+        if (std::holds_alternative<IntegerTypeInfo>(fromInfo.definition) &&
+            std::holds_alternative<BooleanTypeInfo>(toInfo.definition)) {
+            return builder->CreateICmpNE(value, ConstantInt::get(builder->getInt32Ty(), 0), "casttmp");
+        }
         if (std::holds_alternative<RealTypeInfo>(fromInfo.definition) &&
             std::holds_alternative<IntegerTypeInfo>(toInfo.definition)) {
             return builder->CreateFPToSI(value, builder->getInt32Ty(), "casttmp");
         }
-        if (std::holds_alternative<IntegerTypeInfo>(fromInfo.definition) &&
-            std::holds_alternative<BooleanTypeInfo>(toInfo.definition)) {
-            return builder->CreateICmpNE(value, ConstantInt::get(builder->getInt32Ty(), 0), "booltmp");
-        }
         if (std::holds_alternative<BooleanTypeInfo>(fromInfo.definition) &&
             std::holds_alternative<IntegerTypeInfo>(toInfo.definition)) {
-            return builder->CreateZExt(value, builder->getInt32Ty(), "inttmp");
+            return builder->CreateZExt(value, builder->getInt32Ty(), "casttmp");
+        }
+        if (std::holds_alternative<BooleanTypeInfo>(fromInfo.definition) &&
+            std::holds_alternative<RealTypeInfo>(toInfo.definition)) {
+            return builder->CreateUIToFP(value, builder->getDoubleTy(), "casttmp");
         }
 
         throw CompileError{"Cannot cast between specified types", span};
