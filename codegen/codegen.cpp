@@ -1,7 +1,8 @@
-#include "compiler.hpp"
+#include "codegen.hpp"
 
+#include "Support/raw_ostream.h"
 #include "analyzer/symbol_table.hpp"
-#include "compiler/compile_error.hpp"
+#include "codegen_error.hpp"
 #include "parser/ast.hpp"
 
 #include <llvm/IR/Constant.h>
@@ -18,11 +19,11 @@
 #include <llvm/IR/Value.h>
 #include <llvm/IR/Verifier.h>
 #include <llvm/Support/Casting.h>
+#include <llvm/Support/raw_os_ostream.h>
 
 #include <cassert>
 #include <climits>
 #include <cstddef>
-#include <iostream>
 #include <memory>
 #include <string>
 #include <unordered_map>
@@ -30,20 +31,20 @@
 #include <variant>
 #include <vector>
 
-namespace compiler {
+namespace codegen {
 
 using namespace parser;
 using namespace analyzer;
 using namespace llvm;
 
 // NOLINTBEGIN(*recursion*)
-struct Compiler {
+struct CodeGenerator {
   private:
     std::unique_ptr<llvm::LLVMContext> context = std::make_unique<LLVMContext>();
     std::unique_ptr<llvm::IRBuilder<>> builder = std::make_unique<IRBuilder<>>(*context);
     std::unique_ptr<llvm::Module> module = std::make_unique<Module>("Module", *context);
 
-    FunctionType* printfType = FunctionType::get(builder->getInt32Ty(), {builder->getInt8Ty()->getPointerTo()}, true);
+    FunctionType* printfType = FunctionType::get(builder->getInt32Ty(), {PointerType::getUnqual(*context)}, true);
     Function* printfFunc = Function::Create(printfType, Function::ExternalLinkage, "printf", module.get());
 
     std::unordered_map<std::string, Value*> namedValues;
@@ -103,7 +104,7 @@ struct Compiler {
             return builder->CreateUIToFP(value, builder->getDoubleTy(), "casttmp");
         }
 
-        throw CompileError{"Cannot cast between specified types", span};
+        throw CodegenError{"Cannot cast between specified types", span};
     }
 
     Value* generateExpression(const parser::Expression& expr) {
@@ -264,7 +265,7 @@ struct Compiler {
                     result = builder->CreateFDiv(result, right, "fdivtmp");
                     break;
                 case parser::Summand::Operator::Modulo:
-                    throw CompileError("Modulo operation not supported for floating point types", getSpan(summand));
+                    throw CodegenError("Modulo operation not supported for floating point types", getSpan(summand));
                 }
             }
         }
@@ -300,7 +301,7 @@ struct Compiler {
     Value* generateModifiablePrimary(const parser::ModifiablePrimary& primary) {
         Value* base = namedValues[primary.variable.text];
         if (!base) {
-            throw CompileError{"Undeclared variable: " + primary.variable.text, primary.variable.span};
+            throw CodegenError{"Undeclared variable: " + primary.variable.text, primary.variable.span};
         }
 
         Value* current = base;
@@ -314,7 +315,7 @@ struct Compiler {
 
                 const TypeInfo& typeInfo = symbolTable.getTypeInfo(currentTypeId);
                 if (!std::holds_alternative<ArrayTypeInfo>(typeInfo.definition)) {
-                    throw CompileError{"Indexing non-array type", index.bracket_span};
+                    throw CodegenError{"Indexing non-array type", index.bracket_span};
                 }
 
                 const auto& arrayInfo = std::get<ArrayTypeInfo>(typeInfo.definition);
@@ -328,7 +329,7 @@ struct Compiler {
 
                 const TypeInfo& typeInfo = symbolTable.getTypeInfo(currentTypeId);
                 if (!std::holds_alternative<RecordTypeInfo>(typeInfo.definition)) {
-                    throw CompileError{"Accessing field of non-record type", field.span};
+                    throw CodegenError{"Accessing field of non-record type", field.span};
                 }
 
                 const auto& recordInfo = std::get<RecordTypeInfo>(typeInfo.definition);
@@ -342,7 +343,7 @@ struct Compiler {
                 }
 
                 if (fieldIndex == static_cast<std::size_t>(-1)) {
-                    throw CompileError{"No such field in record: " + field.text, field.span};
+                    throw CodegenError{"No such field in record: " + field.text, field.span};
                 }
 
                 std::vector<Value*> indices = {ConstantInt::get(builder->getInt32Ty(), 0),
@@ -361,7 +362,7 @@ struct Compiler {
     Value* generateRoutineCall(const parser::RoutineCall& call) {
         Function* function = module->getFunction(call.routine_name.text);
         if (!function) {
-            throw CompileError{"Undefined routine: " + call.routine_name.text, call.routine_name.span};
+            throw CodegenError{"Undefined routine: " + call.routine_name.text, call.routine_name.span};
         }
 
         std::vector<Value*> args;
@@ -384,7 +385,7 @@ struct Compiler {
     Value* generateModifiablePrimaryAddress(const parser::ModifiablePrimary& primary) {
         Value* base = namedValues[primary.variable.text];
         if (!base) {
-            throw CompileError{"Undeclared variable: " + primary.variable.text, primary.variable.span};
+            throw CodegenError{"Undeclared variable: " + primary.variable.text, primary.variable.span};
         }
 
         Value* current = base;
@@ -397,7 +398,7 @@ struct Compiler {
 
                 const TypeInfo& typeInfo = symbolTable.getTypeInfo(currentTypeId);
                 if (!std::holds_alternative<ArrayTypeInfo>(typeInfo.definition)) {
-                    throw CompileError{"Indexing non-array type", index.bracket_span};
+                    throw CodegenError{"Indexing non-array type", index.bracket_span};
                 }
 
                 const auto& arrayInfo = std::get<ArrayTypeInfo>(typeInfo.definition);
@@ -411,7 +412,7 @@ struct Compiler {
 
                 const TypeInfo& typeInfo = symbolTable.getTypeInfo(currentTypeId);
                 if (!std::holds_alternative<RecordTypeInfo>(typeInfo.definition)) {
-                    throw CompileError{"Accessing field of non-record type", field.span};
+                    throw CodegenError{"Accessing field of non-record type", field.span};
                 }
 
                 const auto& recordInfo = std::get<RecordTypeInfo>(typeInfo.definition);
@@ -425,7 +426,7 @@ struct Compiler {
                 }
 
                 if (fieldIndex == static_cast<std::size_t>(-1)) {
-                    throw CompileError{"No such field in record: " + field.text, field.span};
+                    throw CodegenError{"No such field in record: " + field.text, field.span};
                 }
 
                 std::vector<Value*> indices = {ConstantInt::get(builder->getInt32Ty(), 0),
@@ -564,7 +565,7 @@ struct Compiler {
         const TypeInfo& arrayTypeInfo = symbolTable.getTypeInfo(arrayTypeId);
 
         if (!std::holds_alternative<ArrayTypeInfo>(arrayTypeInfo.definition)) {
-            throw CompileError{"For loop range must be an array", forStmt.variable_name.span};
+            throw CodegenError{"For loop range must be an array", forStmt.variable_name.span};
         }
 
         const auto& arrayInfo = std::get<ArrayTypeInfo>(arrayTypeInfo.definition);
@@ -728,7 +729,7 @@ struct Compiler {
                     builder->CreateCall(printfFunc, {formatStr, value});
                 } else {
                     const auto& expr = std::get<Expression>(arg);
-                    throw CompileError{"Cannot print type '" + symbolTable.getTypeInfo(expr.type).name + "'",
+                    throw CodegenError{"Cannot print type '" + symbolTable.getTypeInfo(expr.type).name + "'",
                                        getSpan(expr)};
                 }
             }
@@ -809,7 +810,7 @@ struct Compiler {
         std::string verification_error;
         llvm::raw_string_ostream error_stream(verification_error);
         if (verifyFunction(*function, &error_stream)) {
-            throw CompileError{"Function verification failed: " + verification_error, declaration.name.span};
+            throw CodegenError{"Function verification failed: " + verification_error, declaration.name.span};
         }
 
         namedValues = std::move(oldNamedValues);
@@ -842,35 +843,25 @@ struct Compiler {
     }
 
   public:
-    explicit Compiler(const Program& ast, const SymbolTable& symbolTable) : symbolTable{symbolTable}, program{ast} {}
+    explicit CodeGenerator(const Program& ast, const SymbolTable& symbolTable)
+        : symbolTable{symbolTable}, program{ast} {}
 
-    static void saveLLVMIRToFile(llvm::Module& module, const std::string& filename) {
-        std::error_code ec;
-        llvm::raw_fd_ostream out(filename, ec);
-        if (ec) {
-            std::cerr << std::format("Failed to open {} for writing: {}", filename, ec.message());
-            return;
-        }
-        module.print(out, nullptr);
-        out.close();
-        std::cerr << std::format("LLVM IR saved to {}", filename);
-    }
-
-    std::expected<std::unique_ptr<llvm::Module>, CompileError> compile() {
+    std::expected<void, CodegenError> generate(llvm::raw_ostream& out) {
         try {
             generateCode();
-            saveLLVMIRToFile(*module, "output.ll");
-            return nullptr;
-        } catch (const CompileError& error) {
+            module->print(out, nullptr);
+            return {};
+        } catch (const CodegenError& error) {
             return std::unexpected{error};
         }
     }
 };
 // NOLINTEND(*recursion*)
 
-std::expected<std::unique_ptr<llvm::Module>, CompileError> compile(const Program& ast, const SymbolTable& symbolTable) {
-    Compiler compiler{ast, symbolTable};
-    return compiler.compile();
+std::expected<void, CodegenError> generate_code(const Program& ast, const SymbolTable& symbolTable, std::ostream& out) {
+    CodeGenerator codegen{ast, symbolTable};
+    llvm::raw_os_ostream stream_adaptor{out};
+    return codegen.generate(stream_adaptor);
 }
 
-} // namespace compiler
+} // namespace codegen

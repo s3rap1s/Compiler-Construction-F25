@@ -33,7 +33,7 @@ add_executable(main
     analyzer/analyzer.cpp
     analyzer/symbol_table.cpp
 
-    compiler/compiler.cpp
+    codegen/codegen.cpp
 
     main.cpp
 )
