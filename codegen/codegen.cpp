@@ -22,10 +22,10 @@
 #include <llvm/Support/raw_os_ostream.h>
 
 #include <cassert>
-#include <climits>
 #include <cstddef>
 #include <memory>
 #include <string>
+#include <string_view>
 #include <unordered_map>
 #include <utility>
 #include <variant>
@@ -44,40 +44,77 @@ struct CodeGenerator {
     llvm::IRBuilder<> builder{context};
     llvm::Module module{"Module", context};
 
-    FunctionType* printfType = FunctionType::get(builder.getInt32Ty(), {makePointerType()}, true);
+    FunctionType* printfType =
+        FunctionType::get(builder.getInt32Ty(), {llvm::PointerType::get(builder.getContext(), 0)}, true);
     Function* printfFunc = Function::Create(printfType, Function::ExternalLinkage, "printf", &module);
+
+    FunctionType* mallocType =
+        FunctionType::get(llvm::PointerType::get(builder.getContext(), 0), {builder.getInt64Ty()}, false);
+    Function* mallocFunc = Function::Create(mallocType, Function::ExternalLinkage, "malloc", &module);
+
+    FunctionType* freeType =
+        FunctionType::get(builder.getVoidTy(), {llvm::PointerType::get(builder.getContext(), 0)}, false);
+    Function* freeFunc = Function::Create(freeType, Function::ExternalLinkage, "free", &module);
 
     std::unordered_map<std::string, Value*> namedValues;
     std::unordered_map<std::string, Function*> functions;
+    std::vector<std::pair<std::string, TypeId>> globalVariables;
+    std::vector<std::pair<std::string, std::pair<Value*, TypeId>>> globalInitValues;
 
-    const SymbolTable& symbolTable; // NOLINT(*ref*)
-    const Program& program;         // NOLINT(*ref*)
+    const SymbolTable& symbolTable;
+    const Program& program;
+    const std::string entry_point;
 
-    llvm::Type* makePointerType() {
-        return PointerType::getUnqual(context);
+    static bool isRecordType(TypeId typeId, const SymbolTable& symbolTable) {
+        const auto& typeInfo = symbolTable.getTypeInfo(typeId);
+        return std::holds_alternative<RecordTypeInfo>(typeInfo.definition) ||
+               std::holds_alternative<ArrayTypeInfo>(typeInfo.definition);
     }
 
-    llvm::Type* getLLVMType(const analyzer::TypeInfo& typeInfo) {
-        const auto& type = typeInfo.definition;
-        return std::visit(overloaded{
-                              [this](const analyzer::IntegerTypeInfo&) -> llvm::Type* { return builder.getInt32Ty(); },
-                              [this](const analyzer::RealTypeInfo&) -> llvm::Type* { return builder.getDoubleTy(); },
-                              [this](const analyzer::BooleanTypeInfo&) -> llvm::Type* { return builder.getInt1Ty(); },
-                              [this, type](const analyzer::ArrayTypeInfo& arrayType) -> llvm::Type* {
-                                  llvm::Type* elementType =
-                                      getLLVMType(symbolTable.getTypeInfo(arrayType.element_type));
-                                  return llvm::ArrayType::get(elementType, arrayType.size);
-                              },
-                              [this, type](const analyzer::RecordTypeInfo& recordType) -> llvm::Type* {
-                                  std::vector<llvm::Type*> fieldTypes;
-                                  fieldTypes.reserve(recordType.fields.size());
-                                  for (const auto& [name, typeId] : recordType.fields) {
-                                      fieldTypes.push_back(getLLVMType(symbolTable.getTypeInfo(typeId)));
-                                  }
-                                  return StructType::get(context, fieldTypes);
-                              },
-                          },
-                          type);
+    static llvm::Type*
+    getBaseLLVMType(const analyzer::TypeInfo& typeInfo, llvm::LLVMContext& context, const SymbolTable& symbolTable) {
+        return std::visit(
+            [&](auto&& arg) -> llvm::Type* {
+                using T = std::decay_t<decltype(arg)>;
+                if constexpr (std::is_same_v<T, IntegerTypeInfo>) {
+                    return llvm::Type::getInt32Ty(context);
+                } else if constexpr (std::is_same_v<T, RealTypeInfo>) {
+                    return llvm::Type::getDoubleTy(context);
+                } else if constexpr (std::is_same_v<T, BooleanTypeInfo>) {
+                    return llvm::Type::getInt1Ty(context);
+                } else if constexpr (std::is_same_v<T, ArrayTypeInfo>) {
+                    return StructType::get(context,
+                                           {llvm::Type::getInt32Ty(context), llvm::PointerType::get(context, 0)});
+                } else if constexpr (std::is_same_v<T, RecordTypeInfo>) {
+                    std::vector<llvm::Type*> fieldTypes;
+                    fieldTypes.reserve(arg.fields.size());
+                    for (const auto& [name, typeId] : arg.fields) {
+                        fieldTypes.push_back(getBaseLLVMType(symbolTable.getTypeInfo(typeId), context, symbolTable));
+                    }
+                    return StructType::get(context, fieldTypes);
+                }
+                return nullptr;
+            },
+            typeInfo.definition);
+    }
+
+    llvm::Type*
+    getLLVMType(const analyzer::TypeInfo& typeInfo, llvm::LLVMContext& context, const SymbolTable& symbolTable) {
+        auto* baseType = getBaseLLVMType(typeInfo, context, symbolTable);
+
+        if (std::holds_alternative<RecordTypeInfo>(typeInfo.definition) ||
+            std::holds_alternative<ArrayTypeInfo>(typeInfo.definition)) {
+            return llvm::PointerType::get(builder.getContext(), 0);
+        }
+        return baseType;
+    }
+
+    llvm::Type* getLLVMType(TypeId typeId) {
+        return getLLVMType(symbolTable.getTypeInfo(typeId), context, symbolTable);
+    }
+
+    llvm::Type* getBaseLLVMType(TypeId typeId) {
+        return getBaseLLVMType(symbolTable.getTypeInfo(typeId), context, symbolTable);
     }
 
     Value* generateCast(Value* value, TypeId fromType, TypeId toType, const Span& span) {
@@ -109,6 +146,27 @@ struct CodeGenerator {
         }
 
         throw CodegenError{"Cannot cast between specified types", span};
+    }
+
+    Value* allocateHeap(TypeId typeId) {
+        llvm::Type* baseType = getBaseLLVMType(typeId);
+        uint64_t size = module.getDataLayout().getTypeAllocSize(baseType);
+
+        Value* sizeVal = ConstantInt::get(builder.getInt64Ty(), size);
+        Value* rawPtr = builder.CreateCall(mallocFunc, {sizeVal}, "malloc");
+
+        return builder.CreateBitCast(rawPtr, llvm::PointerType::get(builder.getContext(), 0), "heapalloc");
+    }
+
+    Value* allocateArrayData(TypeId elementTypeId, size_t arraySize) {
+        llvm::Type* elementType = getBaseLLVMType(elementTypeId);
+        uint64_t elementSize = module.getDataLayout().getTypeAllocSize(elementType);
+        uint64_t totalSize = elementSize * arraySize;
+
+        Value* sizeVal = ConstantInt::get(builder.getInt64Ty(), totalSize);
+        Value* rawPtr = builder.CreateCall(mallocFunc, {sizeVal}, "malloc_array_data");
+
+        return builder.CreateBitCast(rawPtr, llvm::PointerType::get(builder.getContext(), 0), "array_data");
     }
 
     Value* generateExpression(const parser::Expression& expr) {
@@ -253,7 +311,6 @@ struct CodeGenerator {
                     break;
                 }
             } else {
-
                 if (result->getType()->isIntegerTy()) {
                     result = builder.CreateSIToFP(result, builder.getDoubleTy());
                 }
@@ -303,71 +360,165 @@ struct CodeGenerator {
     }
 
     Value* generateModifiablePrimary(const parser::ModifiablePrimary& primary) { // NOLINT(*complexity*)
-        Value* base = namedValues[primary.variable.text];
-        if (!base) {
+        Value* varPtr = namedValues[primary.variable.text];
+        if (!varPtr) {
             throw CodegenError{"Undeclared variable: " + primary.variable.text, primary.variable.span};
         }
 
-        Value* current = base;
+        Value* current = varPtr;
         TypeId currentTypeId = primary.variable_type;
+
+        if (isRecordType(currentTypeId, symbolTable)) {
+            current = builder.CreateLoad(llvm::PointerType::get(builder.getContext(), 0), current, "loadptr");
+        } else {
+            llvm::Type* baseType = getBaseLLVMType(currentTypeId);
+            current = builder.CreateLoad(baseType, current, "loadval");
+        }
 
         for (const auto& accessor : primary.accessors) {
             if (std::holds_alternative<Index>(accessor.key)) {
                 const auto& index = std::get<Index>(accessor.key);
-
                 Value* indexValue = generateExpression(index.value);
 
                 const TypeInfo& typeInfo = symbolTable.getTypeInfo(currentTypeId);
-                if (!std::holds_alternative<ArrayTypeInfo>(typeInfo.definition)) {
+
+                if (std::holds_alternative<ArrayTypeInfo>(typeInfo.definition)) {
+                    const auto& arrayInfo = std::get<ArrayTypeInfo>(typeInfo.definition);
+
+                    Value* dataPtrPtr = builder.CreateStructGEP(getBaseLLVMType(currentTypeId), current, 1, "dataptr");
+                    Value* dataPtr =
+                        builder.CreateLoad(llvm::PointerType::get(builder.getContext(), 0), dataPtrPtr, "data");
+
+                    Value* adjIndex =
+                        builder.CreateSub(indexValue, ConstantInt::get(builder.getInt32Ty(), 1), "adjindex");
+
+                    current = builder.CreateGEP(getBaseLLVMType(arrayInfo.element_type), dataPtr, adjIndex, "elemptr");
+
+                    TypeId elementTypeId = arrayInfo.element_type;
+                    if (!isRecordType(elementTypeId, symbolTable)) {
+                        current = builder.CreateLoad(getBaseLLVMType(elementTypeId), current, "elemval");
+                    }
+                    currentTypeId = elementTypeId;
+                } else {
                     throw CodegenError{"Indexing non-array type", index.bracket_span};
                 }
-
-                const auto& arrayInfo = std::get<ArrayTypeInfo>(typeInfo.definition);
-
-                std::vector<Value*> indices = {ConstantInt::get(builder.getInt32Ty(), 0), indexValue};
-
-                current = builder.CreateGEP(getLLVMType(typeInfo), current, indices, "arrayidx");
-                currentTypeId = arrayInfo.element_type;
             } else {
                 const auto& field = std::get<Identifier>(accessor.key);
-
                 const TypeInfo& typeInfo = symbolTable.getTypeInfo(currentTypeId);
+
                 if (std::holds_alternative<ArrayTypeInfo>(typeInfo.definition)) {
                     if (field.text == "size") {
-                        const auto& arrayInfo = std::get<ArrayTypeInfo>(typeInfo.definition);
-                        return ConstantInt::get(builder.getInt32Ty(), arrayInfo.size);
+                        Value* sizePtr = builder.CreateStructGEP(getBaseLLVMType(currentTypeId), current, 0, "sizeptr");
+                        current = builder.CreateLoad(builder.getInt32Ty(), sizePtr, "size");
+                        currentTypeId = symbolTable.IntegerTypeId;
+                    } else {
+                        throw CodegenError{"No such field in array: " + field.text, field.span};
                     }
-                    throw CodegenError{"No such field in array: " + field.text, field.span};
-                }
-                if (!std::holds_alternative<RecordTypeInfo>(typeInfo.definition)) {
+                } else if (std::holds_alternative<RecordTypeInfo>(typeInfo.definition)) {
+                    const auto& recordInfo = std::get<RecordTypeInfo>(typeInfo.definition);
+
+                    std::size_t fieldIndex = -1;
+                    for (std::size_t i = 0; i < recordInfo.fields.size(); ++i) {
+                        if (recordInfo.fields[i].first == field.text) {
+                            fieldIndex = i;
+                            break;
+                        }
+                    }
+
+                    if (fieldIndex == static_cast<std::size_t>(-1)) {
+                        throw CodegenError{"No such field in record: " + field.text, field.span};
+                    }
+
+                    TypeId fieldTypeId = recordInfo.fields[fieldIndex].second;
+                    Value* fieldPtr =
+                        builder.CreateStructGEP(getBaseLLVMType(currentTypeId), current, fieldIndex, "fieldptr");
+
+                    if (isRecordType(fieldTypeId, symbolTable)) {
+                        current = fieldPtr;
+                    } else {
+                        current = builder.CreateLoad(getBaseLLVMType(fieldTypeId), fieldPtr, "fieldval");
+                    }
+                    currentTypeId = fieldTypeId;
+                } else {
                     throw CodegenError{"Accessing field of non-record type", field.span};
                 }
-
-                const auto& recordInfo = std::get<RecordTypeInfo>(typeInfo.definition);
-
-                std::size_t fieldIndex = -1;
-                for (std::size_t i = 0; i < recordInfo.fields.size(); ++i) {
-                    if (recordInfo.fields[i].first == field.text) {
-                        fieldIndex = i;
-                        break;
-                    }
-                }
-
-                if (fieldIndex == static_cast<std::size_t>(-1)) {
-                    throw CodegenError{"No such field in record: " + field.text, field.span};
-                }
-
-                std::vector<Value*> indices = {ConstantInt::get(builder.getInt32Ty(), 0),
-                                               ConstantInt::get(builder.getInt32Ty(), fieldIndex)};
-
-                current = builder.CreateGEP(getLLVMType(typeInfo), current, indices, "fieldptr");
-                currentTypeId = recordInfo.fields[fieldIndex].second;
             }
         }
 
-        Value* loadedValue =
-            builder.CreateLoad(getLLVMType(symbolTable.getTypeInfo(currentTypeId)), current, "loadtmp");
-        return loadedValue;
+        return current;
+    }
+
+    Value* generateModifiablePrimaryAddress(const parser::ModifiablePrimary& primary) { // NOLINT(*complexity*)
+        Value* varPtr = namedValues[primary.variable.text];
+        if (!varPtr) {
+            throw CodegenError{"Undeclared variable: " + primary.variable.text, primary.variable.span};
+        }
+
+        Value* current = varPtr;
+        TypeId currentTypeId = primary.variable_type;
+
+        if (isRecordType(currentTypeId, symbolTable)) {
+            current = builder.CreateLoad(llvm::PointerType::get(builder.getContext(), 0), current, "loadptr");
+        }
+
+        for (const auto& accessor : primary.accessors) {
+            if (std::holds_alternative<Index>(accessor.key)) {
+                const auto& index = std::get<Index>(accessor.key);
+                Value* indexValue = generateExpression(index.value);
+
+                const TypeInfo& typeInfo = symbolTable.getTypeInfo(currentTypeId);
+
+                if (std::holds_alternative<ArrayTypeInfo>(typeInfo.definition)) {
+                    const auto& arrayInfo = std::get<ArrayTypeInfo>(typeInfo.definition);
+
+                    Value* dataPtrPtr = builder.CreateStructGEP(getBaseLLVMType(currentTypeId), current, 1, "dataptr");
+                    Value* dataPtr =
+                        builder.CreateLoad(llvm::PointerType::get(builder.getContext(), 0), dataPtrPtr, "data");
+
+                    Value* adjIndex =
+                        builder.CreateSub(indexValue, ConstantInt::get(builder.getInt32Ty(), 1), "adjindex");
+
+                    current = builder.CreateGEP(getBaseLLVMType(arrayInfo.element_type), dataPtr, adjIndex, "elemptr");
+                    currentTypeId = arrayInfo.element_type;
+                } else {
+                    throw CodegenError{"Indexing non-array type", index.bracket_span};
+                }
+            } else {
+                const auto& field = std::get<Identifier>(accessor.key);
+                const TypeInfo& typeInfo = symbolTable.getTypeInfo(currentTypeId);
+
+                if (std::holds_alternative<ArrayTypeInfo>(typeInfo.definition)) {
+                    if (field.text == "size") {
+                        Value* sizePtr = builder.CreateStructGEP(getBaseLLVMType(currentTypeId), current, 0, "sizeptr");
+                        current = sizePtr;
+                        currentTypeId = symbolTable.IntegerTypeId;
+                    } else {
+                        throw CodegenError{"No such field in array: " + field.text, field.span};
+                    }
+                } else if (std::holds_alternative<RecordTypeInfo>(typeInfo.definition)) {
+                    const auto& recordInfo = std::get<RecordTypeInfo>(typeInfo.definition);
+
+                    std::size_t fieldIndex = -1;
+                    for (std::size_t i = 0; i < recordInfo.fields.size(); ++i) {
+                        if (recordInfo.fields[i].first == field.text) {
+                            fieldIndex = i;
+                            break;
+                        }
+                    }
+
+                    if (fieldIndex == static_cast<std::size_t>(-1)) {
+                        throw CodegenError{"No such field in record: " + field.text, field.span};
+                    }
+
+                    current = builder.CreateStructGEP(getBaseLLVMType(currentTypeId), current, fieldIndex, "fieldptr");
+                    currentTypeId = recordInfo.fields[fieldIndex].second;
+                } else {
+                    throw CodegenError{"Accessing field of non-record type", field.span};
+                }
+            }
+        }
+
+        return current;
     }
 
     Value* generateRoutineCall(const parser::RoutineCall& call) {
@@ -377,136 +528,145 @@ struct CodeGenerator {
         }
 
         std::vector<Value*> args;
-        args.reserve(call.arguments.size());
         for (const auto& arg : call.arguments) {
-            args.push_back(generateExpression(arg));
+            Value* argValue = generateExpression(arg);
+            args.push_back(argValue);
         }
 
         if (function->getReturnType()->isVoidTy()) {
             return builder.CreateCall(function, args);
         }
-        return builder.CreateCall(function, args, !args.empty() ? "calltmp" : "");
+        return builder.CreateCall(function, args, "calltmp");
     }
 
     void generateAssignment(const AssignmentStatement& assignment) {
         Value* rhs = generateExpression(assignment.expression);
-
-        Value* lhs = generateModifiablePrimaryAddress(assignment.target);
-
-        builder.CreateStore(rhs, lhs);
-    }
-
-    Value* generateModifiablePrimaryAddress(const parser::ModifiablePrimary& primary) { // NOLINT(*complexity*)
-        Value* base = namedValues[primary.variable.text];
-        if (!base) {
-            throw CodegenError{"Undeclared variable: " + primary.variable.text, primary.variable.span};
-        }
-
-        Value* current = base;
-        TypeId currentTypeId = primary.variable_type;
-
-        for (const auto& accessor : primary.accessors) {
-            if (std::holds_alternative<Index>(accessor.key)) {
-                const auto& index = std::get<Index>(accessor.key);
-                Value* indexValue = generateExpression(index.value);
-
-                const TypeInfo& typeInfo = symbolTable.getTypeInfo(currentTypeId);
-                if (!std::holds_alternative<ArrayTypeInfo>(typeInfo.definition)) {
-                    throw CodegenError{"Indexing non-array type", index.bracket_span};
-                }
-
-                const auto& arrayInfo = std::get<ArrayTypeInfo>(typeInfo.definition);
-
-                std::vector<Value*> indices = {ConstantInt::get(builder.getInt32Ty(), 0), indexValue};
-
-                current = builder.CreateGEP(getLLVMType(typeInfo), current, indices, "arrayidx");
-                currentTypeId = arrayInfo.element_type;
-            } else {
-                const auto& field = std::get<Identifier>(accessor.key);
-
-                const TypeInfo& typeInfo = symbolTable.getTypeInfo(currentTypeId);
-                if (std::holds_alternative<ArrayTypeInfo>(typeInfo.definition)) {
-                    if (field.text == "size") {
-                        const auto& arrayInfo = std::get<ArrayTypeInfo>(typeInfo.definition);
-                        return ConstantInt::get(builder.getInt32Ty(), arrayInfo.size);
-                    }
-                    throw CodegenError{"No such field in array: " + field.text, field.span};
-                }
-                if (!std::holds_alternative<RecordTypeInfo>(typeInfo.definition)) {
-                    throw CodegenError{"Accessing field of non-record type", field.span};
-                }
-
-                const auto& recordInfo = std::get<RecordTypeInfo>(typeInfo.definition);
-
-                std::size_t fieldIndex = -1;
-                for (std::size_t i = 0; i < recordInfo.fields.size(); ++i) {
-                    if (recordInfo.fields[i].first == field.text) {
-                        fieldIndex = i;
-                        break;
-                    }
-                }
-
-                if (fieldIndex == static_cast<std::size_t>(-1)) {
-                    throw CodegenError{"No such field in record: " + field.text, field.span};
-                }
-
-                std::vector<Value*> indices = {ConstantInt::get(builder.getInt32Ty(), 0),
-                                               ConstantInt::get(builder.getInt32Ty(), fieldIndex)};
-
-                current = builder.CreateGEP(getLLVMType(typeInfo), current, indices, "fieldptr");
-                currentTypeId = recordInfo.fields[fieldIndex].second;
-            }
-        }
-
-        return current;
+        Value* lhsAddr = generateModifiablePrimaryAddress(assignment.target);
+        builder.CreateStore(rhs, lhsAddr);
     }
 
     void generateGlobalVariableDeclaration(const parser::VariableDeclaration& declaration) {
-        llvm::Type* llvmType = getLLVMType(symbolTable.getTypeInfo(declaration.resolved_type));
-        Constant* initialValue = nullptr;
+        globalVariables.emplace_back(declaration.name.text, declaration.resolved_type);
+
+        llvm::Type* varType = nullptr;
+
+        varType = llvm::PointerType::get(builder.getContext(), 0);
+
+        auto* globalVar = new GlobalVariable(module,
+                                             varType,
+                                             false,
+                                             GlobalValue::ExternalLinkage,
+                                             ConstantPointerNull::get(llvm::PointerType::get(builder.getContext(), 0)),
+                                             declaration.name.text);
+
+        namedValues[declaration.name.text] = globalVar;
 
         if (declaration.value) {
-            Value* value = generateExpression(*declaration.value);
-            if (declaration.resolved_type != declaration.value->type) {
-                value = generateCast(value, declaration.value->type, declaration.resolved_type, declaration.name.span);
-            }
-            initialValue = dyn_cast<Constant>(value);
-        } else {
-            initialValue = Constant::getNullValue(llvmType);
+            Value* initValue = generateExpression(*declaration.value);
+            globalInitValues.emplace_back(declaration.name.text, std::make_pair(initValue, declaration.resolved_type));
         }
-
-        auto* globalVariable = new GlobalVariable(
-            module, llvmType, false, GlobalValue::ExternalLinkage, initialValue, declaration.name.text);
-        namedValues[declaration.name.text] = globalVariable;
     }
 
-    void generateLocalVariableDeclaration(const parser::VariableDeclaration& declaration) {
-        llvm::Type* llvmType = getLLVMType(symbolTable.getTypeInfo(declaration.resolved_type));
-
+    void generateLocalVariableDeclaration(const parser::VariableDeclaration& declaration) { // NOLINT(*complexity*)
         Function* currentFunction = builder.GetInsertBlock()->getParent();
-        IRBuilder<> allocaBuilder(&currentFunction->getEntryBlock(), currentFunction->getEntryBlock().begin());
-        AllocaInst* alloca = allocaBuilder.CreateAlloca(llvmType, nullptr, declaration.name.text);
 
-        if (declaration.value) {
-            Value* value = generateExpression(*declaration.value);
-            if (declaration.resolved_type != declaration.value->type) {
-                value = generateCast(value, declaration.value->type, declaration.resolved_type, declaration.name.span);
+        if (isRecordType(declaration.resolved_type, symbolTable)) {
+            IRBuilder<> allocaBuilder(&currentFunction->getEntryBlock(), currentFunction->getEntryBlock().begin());
+            AllocaInst* alloca = allocaBuilder.CreateAlloca(
+                llvm::PointerType::get(allocaBuilder.getContext(), 0), nullptr, declaration.name.text);
+
+            Value* heapPtr = allocateHeap(declaration.resolved_type);
+
+            const TypeInfo& typeInfo = symbolTable.getTypeInfo(declaration.resolved_type);
+
+            if (std::holds_alternative<ArrayTypeInfo>(typeInfo.definition)) {
+                const auto& arrayInfo = std::get<ArrayTypeInfo>(typeInfo.definition);
+
+                Value* sizePtr =
+                    builder.CreateStructGEP(getBaseLLVMType(declaration.resolved_type), heapPtr, 0, "sizeptr");
+                builder.CreateStore(ConstantInt::get(builder.getInt32Ty(), arrayInfo.size), sizePtr);
+
+                Value* arrayData = allocateArrayData(arrayInfo.element_type, arrayInfo.size);
+                Value* dataPtr =
+                    builder.CreateStructGEP(getBaseLLVMType(declaration.resolved_type), heapPtr, 1, "dataptr");
+                builder.CreateStore(arrayData, dataPtr);
+
+                llvm::Type* elemType = getBaseLLVMType(arrayInfo.element_type);
+                Value* zeroValue = Constant::getNullValue(elemType);
+                for (size_t i = 0; i < arrayInfo.size; ++i) {
+                    Value* elemPtr =
+                        builder.CreateGEP(elemType, arrayData, ConstantInt::get(builder.getInt32Ty(), i), "elemptr");
+                    builder.CreateStore(zeroValue, elemPtr);
+                }
+            } else {
+                const auto& recordInfo = std::get<RecordTypeInfo>(typeInfo.definition);
+                for (size_t i = 0; i < recordInfo.fields.size(); ++i) {
+                    TypeId fieldTypeId = recordInfo.fields[i].second;
+                    Value* fieldPtr =
+                        builder.CreateStructGEP(getBaseLLVMType(declaration.resolved_type), heapPtr, i, "fieldptr");
+
+                    if (isRecordType(fieldTypeId, symbolTable)) {
+                        const TypeInfo& fieldTypeInfo = symbolTable.getTypeInfo(fieldTypeId);
+                        if (std::holds_alternative<ArrayTypeInfo>(fieldTypeInfo.definition)) {
+                            const auto& arrayInfo = std::get<ArrayTypeInfo>(fieldTypeInfo.definition);
+
+                            Value* sizePtr =
+                                builder.CreateStructGEP(getBaseLLVMType(fieldTypeId), fieldPtr, 0, "sizeptr");
+                            builder.CreateStore(ConstantInt::get(builder.getInt32Ty(), arrayInfo.size), sizePtr);
+
+                            Value* arrayData = allocateArrayData(arrayInfo.element_type, arrayInfo.size);
+                            Value* dataPtr =
+                                builder.CreateStructGEP(getBaseLLVMType(fieldTypeId), fieldPtr, 1, "dataptr");
+                            builder.CreateStore(arrayData, dataPtr);
+
+                            llvm::Type* elemType = getBaseLLVMType(arrayInfo.element_type);
+                            Value* zeroValue = Constant::getNullValue(elemType);
+                            for (size_t j = 0; j < arrayInfo.size; ++j) {
+                                Value* elemPtr = builder.CreateGEP(
+                                    elemType, arrayData, ConstantInt::get(builder.getInt32Ty(), j), "elemptr");
+                                builder.CreateStore(zeroValue, elemPtr);
+                            }
+                        } else {
+                            builder.CreateStore(
+                                ConstantPointerNull::get(llvm::PointerType::get(builder.getContext(), 0)), fieldPtr);
+                        }
+                    } else {
+                        builder.CreateStore(Constant::getNullValue(getBaseLLVMType(fieldTypeId)), fieldPtr);
+                    }
+                }
             }
-            builder.CreateStore(value, alloca);
+
+            builder.CreateStore(heapPtr, alloca); // NOLINT DO NOT TOUCH
+            namedValues[declaration.name.text] = alloca;
+
+            if (declaration.value) {
+                Value* initValue = generateExpression(*declaration.value);
+                builder.CreateStore(initValue, alloca);
+            }
         } else {
-            builder.CreateStore(Constant::getNullValue(llvmType), alloca);
+            IRBuilder<> allocaBuilder(&currentFunction->getEntryBlock(), currentFunction->getEntryBlock().begin());
+            AllocaInst* alloca =
+                allocaBuilder.CreateAlloca(getBaseLLVMType(declaration.resolved_type), nullptr, declaration.name.text);
+
+            if (declaration.value) {
+                Value* value = generateExpression(*declaration.value);
+                if (declaration.resolved_type != declaration.value->type) {
+                    value =
+                        generateCast(value, declaration.value->type, declaration.resolved_type, declaration.name.span);
+                }
+                builder.CreateStore(value, alloca);
+            } else {
+                builder.CreateStore(Constant::getNullValue(getBaseLLVMType(declaration.resolved_type)), alloca);
+            }
+
+            namedValues[declaration.name.text] = alloca;
         }
-
-        namedValues[declaration.name.text] = alloca;
     }
-
-    void generateTypeDeclaration(const TypeDeclaration& declaration) {}
 
     void generateStatement(const Statement& stmt) {
         std::visit(overloaded{
                        [this](const VariableDeclaration& var) { generateLocalVariableDeclaration(var); },
-                       [this](const TypeDeclaration& type) { generateTypeDeclaration(type); },
-
+                       [](const TypeDeclaration& type) {},
                        [this](const AssignmentStatement& assignment) { generateAssignment(assignment); },
                        [this](const RoutineCall& call) { generateRoutineCall(call); },
                        [this](const WhileStatement& whileStmt) { generateWhileLoop(whileStmt); },
@@ -565,38 +725,25 @@ struct CodeGenerator {
                               Function* function) {
         const auto& arrayExpr = std::get<Expression>(forStmt.range);
 
-        Value* arrayPtr = nullptr;
-
-        if (const auto* rel = std::get_if<Relation>(&arrayExpr.first)) {
-            if (const auto* mp = std::get_if<ModifiablePrimary>(&rel->first.first.first)) {
-                arrayPtr = generateModifiablePrimaryAddress(*mp);
-            } else {
-                Value* arrayValue = generateExpression(arrayExpr);
-                IRBuilder<> allocaBuilder(&function->getEntryBlock(), function->getEntryBlock().begin());
-                AllocaInst* tempAlloca = allocaBuilder.CreateAlloca(
-                    getLLVMType(symbolTable.getTypeInfo(arrayExpr.type)), nullptr, "temp_array");
-                builder.CreateStore(arrayValue, tempAlloca);
-                arrayPtr = tempAlloca;
-            }
-        } else {
-            std::unreachable();
-        }
-
+        Value* arrayPtr = generateExpression(arrayExpr);
         TypeId arrayTypeId = arrayExpr.type;
+
         const TypeInfo& arrayTypeInfo = symbolTable.getTypeInfo(arrayTypeId);
-
-        if (!std::holds_alternative<ArrayTypeInfo>(arrayTypeInfo.definition)) {
-            throw CodegenError{"For loop range must be an array", forStmt.variable_name.span};
-        }
-
         const auto& arrayInfo = std::get<ArrayTypeInfo>(arrayTypeInfo.definition);
-        llvm::Type* elementType = getLLVMType(symbolTable.getTypeInfo(arrayInfo.element_type));
+        llvm::Type* elementType = getBaseLLVMType(arrayInfo.element_type);
+
+        Value* sizePtr = builder.CreateStructGEP(getBaseLLVMType(arrayTypeId), arrayPtr, 0, "sizeptr");
+        Value* arraySize = builder.CreateLoad(builder.getInt32Ty(), sizePtr, "arraysize");
+
+        Value* dataPtrPtr = builder.CreateStructGEP(getBaseLLVMType(arrayTypeId), arrayPtr, 1, "dataptr");
+        Value* dataPtr = builder.CreateLoad(llvm::PointerType::get(builder.getContext(), 0), dataPtrPtr, "data");
 
         IRBuilder<> allocaBuilder(&function->getEntryBlock(), function->getEntryBlock().begin());
         AllocaInst* indexAlloca = allocaBuilder.CreateAlloca(builder.getInt32Ty(), nullptr, "index");
 
         if (forStmt.is_reversed) {
-            builder.CreateStore(ConstantInt::get(builder.getInt32Ty(), arrayInfo.size - 1), indexAlloca);
+            Value* startIndex = builder.CreateSub(arraySize, ConstantInt::get(builder.getInt32Ty(), 1));
+            builder.CreateStore(startIndex, indexAlloca);
         } else {
             builder.CreateStore(ConstantInt::get(builder.getInt32Ty(), 0), indexAlloca);
         }
@@ -613,19 +760,21 @@ struct CodeGenerator {
         if (forStmt.is_reversed) {
             condValue = builder.CreateICmpSGE(index, ConstantInt::get(builder.getInt32Ty(), 0), "loopcond");
         } else {
-            condValue =
-                builder.CreateICmpSLT(index, ConstantInt::get(builder.getInt32Ty(), arrayInfo.size), "loopcond");
+            condValue = builder.CreateICmpSLT(index, arraySize, "loopcond");
         }
 
         builder.CreateCondBr(condValue, bodyBlock, endBlock);
 
         builder.SetInsertPoint(bodyBlock);
 
-        std::vector<Value*> indices = {ConstantInt::get(builder.getInt32Ty(), 0), index};
-        Value* elementPtr = builder.CreateGEP(getLLVMType(arrayTypeInfo), arrayPtr, indices, "elementptr");
-        Value* element = builder.CreateLoad(elementType, elementPtr, "element");
+        Value* elementPtr = builder.CreateGEP(elementType, dataPtr, index, "elementptr");
 
-        builder.CreateStore(element, loopVarAlloca);
+        if (isRecordType(arrayInfo.element_type, symbolTable)) {
+            builder.CreateStore(elementPtr, loopVarAlloca);
+        } else {
+            Value* element = builder.CreateLoad(elementType, elementPtr, "element");
+            builder.CreateStore(element, loopVarAlloca);
+        }
 
         generateBlock(forStmt.body);
 
@@ -728,30 +877,26 @@ struct CodeGenerator {
                 const auto& str = std::get<parser::StringLiteral>(arg);
                 Value* formatStr = builder.CreateGlobalString(str.value);
                 builder.CreateCall(printfFunc, {formatStr});
-                formatStr = builder.CreateGlobalString(" ");
-                builder.CreateCall(printfFunc, {formatStr});
             } else {
                 const auto& expr = std::get<Expression>(arg);
                 Value* value = generateExpression(expr);
 
                 Value* formatStr = nullptr;
-                if (value->getType()->isIntegerTy(CHAR_BIT * sizeof(int))) {
+                if (value->getType()->isIntegerTy(32)) { // NOLINT(*magic*)
                     formatStr = builder.CreateGlobalString("%d ");
                 } else if (value->getType()->isDoubleTy()) {
                     formatStr = builder.CreateGlobalString("%f ");
                 } else if (value->getType()->isIntegerTy(1)) {
                     formatStr = builder.CreateGlobalString("%s ");
-                    Value* trueStr = builder.CreateGlobalString("true ");
-                    Value* falseStr = builder.CreateGlobalString("false ");
+                    Value* trueStr = builder.CreateGlobalString("true");
+                    Value* falseStr = builder.CreateGlobalString("false");
                     value = builder.CreateSelect(value, trueStr, falseStr);
                 }
 
                 if (formatStr) {
                     builder.CreateCall(printfFunc, {formatStr, value});
                 } else {
-                    const auto& expr = std::get<Expression>(arg);
-                    throw CodegenError{"Cannot print type '" + symbolTable.getTypeInfo(expr.type).name + "'",
-                                       getSpan(expr)};
+                    throw CodegenError{"Cannot print this type", getSpan(expr)};
                 }
             }
         }
@@ -768,24 +913,23 @@ struct CodeGenerator {
     }
 
     void generateBlock(const Block& block) {
-        for (const Statement& element : block) {
+        for (const Statement& element : block.statements) {
             generateStatement(element);
         }
     }
 
     Function* generateRoutineDeclaration(const parser::RoutineDeclaration& declaration) {
-        llvm::Type* returnType = declaration.resolved_return_type
-                                     ? getLLVMType(symbolTable.getTypeInfo(*declaration.resolved_return_type))
-                                     : builder.getVoidTy();
+        llvm::Type* returnType =
+            declaration.resolved_return_type ? getLLVMType(*declaration.resolved_return_type) : builder.getVoidTy();
+
         std::vector<llvm::Type*> paramTypes;
         paramTypes.reserve(declaration.parameters.size());
         for (const auto& param : declaration.parameters) {
-            paramTypes.push_back(getLLVMType(symbolTable.getTypeInfo(param.resolved_type)));
+            paramTypes.push_back(getLLVMType(param.resolved_type));
         }
 
         FunctionType* functionType = FunctionType::get(returnType, paramTypes, false);
-        Function* function =
-            Function::Create(functionType, Function::ExternalLinkage, declaration.name.text, &module);
+        Function* function = Function::Create(functionType, Function::ExternalLinkage, declaration.name.text, &module);
 
         std::size_t idx = 0;
         for (auto& arg : function->args()) {
@@ -800,18 +944,33 @@ struct CodeGenerator {
         BasicBlock* block = BasicBlock::Create(context, "entry", function);
         builder.SetInsertPoint(block);
 
+        if (declaration.name.text == "main") {
+            Function* initFunc = module.getFunction("__init_globals");
+            if (initFunc) {
+                builder.CreateCall(initFunc);
+            }
+        }
+
         auto oldNamedValues = namedValues;
 
         for (auto& arg : function->args()) {
-            AllocaInst* alloca = builder.CreateAlloca(arg.getType(), nullptr, arg.getName());
-            builder.CreateStore(&arg, alloca);
-            namedValues[std::string(arg.getName())] = alloca;
+            TypeId paramType = declaration.parameters[arg.getArgNo()].resolved_type;
+
+            if (isRecordType(paramType, symbolTable)) {
+                AllocaInst* alloca =
+                    builder.CreateAlloca(llvm::PointerType::get(builder.getContext(), 0), nullptr, arg.getName());
+                builder.CreateStore(&arg, alloca);
+                namedValues[std::string(arg.getName())] = alloca;
+            } else {
+                AllocaInst* alloca = builder.CreateAlloca(getBaseLLVMType(paramType), nullptr, arg.getName());
+                builder.CreateStore(&arg, alloca);
+                namedValues[std::string(arg.getName())] = alloca;
+            }
         }
 
         if (declaration.body) {
             if (std::holds_alternative<Block>(*declaration.body)) {
                 generateBlock(std::get<Block>(*declaration.body));
-                // return for void functions can be ommited
                 if (!symbolTable.getRoutines().find(declaration.name.text)->second.last_return &&
                     !declaration.return_type)
                     builder.CreateRetVoid();
@@ -820,11 +979,7 @@ struct CodeGenerator {
                 builder.CreateRet(result);
             }
         } else {
-            if (!function->getReturnType()->isVoidTy()) {
-                builder.CreateRet(Constant::getNullValue(function->getReturnType()));
-            } else {
-                builder.CreateRetVoid();
-            }
+            builder.CreateRetVoid();
         }
 
         std::string verification_error;
@@ -836,17 +991,114 @@ struct CodeGenerator {
         namedValues = std::move(oldNamedValues);
     }
 
+    void initializeGlobalVariables() { // NOLINT(*complexity*)
+        FunctionType* initType = FunctionType::get(builder.getVoidTy(), false);
+        Function* initFunc = Function::Create(initType, Function::InternalLinkage, "__init_globals", &module);
+
+        BasicBlock* block = BasicBlock::Create(context, "entry", initFunc);
+        builder.SetInsertPoint(block);
+
+        for (const auto& [name, typeId] : globalVariables) {
+            Value* globalVarPtr = namedValues[name];
+
+            if (isRecordType(typeId, symbolTable)) {
+                const TypeInfo& typeInfo = symbolTable.getTypeInfo(typeId);
+                llvm::Type* baseType = getBaseLLVMType(typeId);
+                uint64_t size = module.getDataLayout().getTypeAllocSize(baseType);
+
+                Value* sizeVal = ConstantInt::get(builder.getInt64Ty(), size);
+                Value* rawPtr = builder.CreateCall(mallocFunc, {sizeVal}, "malloc");
+                Value* heapPtr =
+                    builder.CreateBitCast(rawPtr, PointerType::get(baseType->getContext(), 0), "heapalloc");
+
+                if (std::holds_alternative<ArrayTypeInfo>(typeInfo.definition)) {
+                    const auto& arrayInfo = std::get<ArrayTypeInfo>(typeInfo.definition);
+                    Value* sizePtr = builder.CreateStructGEP(baseType, heapPtr, 0, "sizeptr");
+                    builder.CreateStore(ConstantInt::get(builder.getInt32Ty(), arrayInfo.size), sizePtr);
+                    Value* arrayData = allocateArrayData(arrayInfo.element_type, arrayInfo.size);
+                    Value* dataPtr = builder.CreateStructGEP(baseType, heapPtr, 1, "dataptr");
+                    builder.CreateStore(arrayData, dataPtr);
+                    llvm::Type* elemType = getBaseLLVMType(arrayInfo.element_type);
+                    Value* zeroValue = Constant::getNullValue(elemType);
+                    for (size_t i = 0; i < arrayInfo.size; ++i) {
+                        Value* elemPtr = builder.CreateGEP(
+                            elemType, arrayData, ConstantInt::get(builder.getInt32Ty(), i), "elemptr");
+                        builder.CreateStore(zeroValue, elemPtr);
+                    }
+                } else if (std::holds_alternative<RecordTypeInfo>(typeInfo.definition)) {
+                    const auto& recordInfo = std::get<RecordTypeInfo>(typeInfo.definition);
+                    for (size_t i = 0; i < recordInfo.fields.size(); ++i) {
+                        TypeId fieldTypeId = recordInfo.fields[i].second;
+                        Value* fieldPtr = builder.CreateStructGEP(baseType, heapPtr, i, "fieldptr");
+
+                        if (isRecordType(fieldTypeId, symbolTable)) {
+                            const TypeInfo& fieldTypeInfo = symbolTable.getTypeInfo(fieldTypeId);
+                            if (std::holds_alternative<ArrayTypeInfo>(fieldTypeInfo.definition)) {
+                                const auto& arrayInfo = std::get<ArrayTypeInfo>(fieldTypeInfo.definition);
+
+                                llvm::Type* fieldBaseType = getBaseLLVMType(fieldTypeId);
+
+                                Value* sizePtr = builder.CreateStructGEP(fieldBaseType, fieldPtr, 0, "sizeptr");
+                                builder.CreateStore(ConstantInt::get(builder.getInt32Ty(), arrayInfo.size), sizePtr);
+
+                                Value* arrayData = allocateArrayData(arrayInfo.element_type, arrayInfo.size);
+                                Value* dataPtr = builder.CreateStructGEP(fieldBaseType, fieldPtr, 1, "dataptr");
+                                builder.CreateStore(arrayData, dataPtr);
+
+                                llvm::Type* elemType = getBaseLLVMType(arrayInfo.element_type);
+                                Value* zeroValue = Constant::getNullValue(elemType);
+                                for (size_t j = 0; j < arrayInfo.size; ++j) {
+                                    Value* elemPtr = builder.CreateGEP(
+                                        elemType, arrayData, ConstantInt::get(builder.getInt32Ty(), j), "elemptr");
+                                    builder.CreateStore(zeroValue, elemPtr);
+                                }
+                            } else {
+                                builder.CreateStore(
+                                    ConstantPointerNull::get(llvm::PointerType::get(builder.getContext(), 0)),
+                                    fieldPtr);
+                            }
+                        } else {
+                            builder.CreateStore(Constant::getNullValue(getBaseLLVMType(fieldTypeId)), fieldPtr);
+                        }
+                    }
+                }
+
+                builder.CreateStore(heapPtr, globalVarPtr); // NOLINT DO NOT TOUCH
+            } else {
+                for (const auto& [initName, initPair] : globalInitValues) {
+                    if (initName == name) {
+                        Value* initValue = initPair.first;
+                        TypeId initTypeId = initPair.second;
+
+                        if (initTypeId != typeId) {
+                            initValue = generateCast(initValue, initTypeId, typeId, Span{});
+                        }
+
+                        builder.CreateStore(initValue, globalVarPtr);
+                        break;
+                    }
+                }
+            }
+        }
+
+        builder.CreateRetVoid();
+    }
+
     void generateCode() {
         for (const auto& declaration : program.declarations) {
-            if (std::holds_alternative<VariableDeclaration>(declaration)) {
-                generateGlobalVariableDeclaration(std::get<VariableDeclaration>(declaration));
-            } else if (std::holds_alternative<RoutineDeclaration>(declaration)) {
+            if (std::holds_alternative<RoutineDeclaration>(declaration)) {
                 const auto& routine = std::get<RoutineDeclaration>(declaration);
                 if (!routine.body)
                     continue;
                 Function* func = generateRoutineDeclaration(routine);
-                functions[std::get<RoutineDeclaration>(declaration).name.text] = func;
+                functions[routine.name.text] = func;
+            } else if (std::holds_alternative<VariableDeclaration>(declaration)) {
+                generateGlobalVariableDeclaration(std::get<VariableDeclaration>(declaration));
             }
+        }
+
+        if (!globalVariables.empty()) {
+            initializeGlobalVariables();
         }
 
         for (const auto& declaration : program.declarations) {
@@ -860,11 +1112,25 @@ struct CodeGenerator {
                 }
             }
         }
+        if (!module.getFunction("main")) {
+            FunctionType* mainType = FunctionType::get(builder.getInt32Ty(), false);
+            Function* mainFunc = Function::Create(mainType, Function::ExternalLinkage, "main", &module);
+
+            BasicBlock* mainBlock = BasicBlock::Create(context, "entry", mainFunc);
+            builder.SetInsertPoint(mainBlock);
+
+            Function* initFunc = module.getFunction("__init_globals");
+            if (initFunc) {
+                builder.CreateCall(initFunc);
+            }
+
+            builder.CreateRet(ConstantInt::get(builder.getInt32Ty(), 0));
+        }
     }
 
   public:
-    explicit CodeGenerator(const Program& ast, const SymbolTable& symbolTable)
-        : symbolTable{symbolTable}, program{ast} {}
+    explicit CodeGenerator(const Program& ast, const SymbolTable& symbolTable, std::string_view entry_point)
+        : symbolTable{symbolTable}, program{ast}, entry_point{entry_point} {}
 
     std::expected<void, CodegenError> generate(llvm::raw_ostream& out) {
         try {
@@ -878,8 +1144,9 @@ struct CodeGenerator {
 };
 // NOLINTEND(*recursion*)
 
-std::expected<void, CodegenError> generate_code(const Program& ast, const SymbolTable& symbolTable, std::ostream& out) {
-    CodeGenerator codegen{ast, symbolTable};
+std::expected<void, CodegenError>
+generate_code(const Program& ast, const SymbolTable& symbolTable, std::ostream& out, std::string_view entry_point) {
+    CodeGenerator codegen{ast, symbolTable, entry_point};
     llvm::raw_os_ostream stream_adaptor{out};
     return codegen.generate(stream_adaptor);
 }

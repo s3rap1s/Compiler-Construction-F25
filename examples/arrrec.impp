@@ -11,14 +11,15 @@ end
 
 routine sideff(ps:Points) is
     ps[1].x := 10
+    print ps.size
+    print ps[1].x
     return 1
 end
 
 var c: Container
 
 routine main() is
-    print c.points[1].x
-    c.points[1].x := 1
+    c.points[1].x := 20
     print c.points[1].x
     sideff(c.points)
     print c.points[1].x
@@ -28,6 +29,6 @@ routine main() is
     c.points[2].y := 4
 
     for p in c.points loop
-        print "Point:", p.x, p.y
+        print "Point: ", p.x, p.y
     end
 end

@@ -26,7 +26,7 @@ const std::unordered_map<std::string, RoutineInfo>& SymbolTable::getRoutines() c
     return routines;
 }
 
-std::unordered_map<const Block*, Scope>& SymbolTable::getScopes() {
+std::unordered_map<BlockId, Scope>& SymbolTable::getScopes() {
     return scopes;
 }
 
@@ -43,23 +43,29 @@ SymbolTable::ScopesView<true> SymbolTable::getScopesView() const {
 }
 
 Scope& SymbolTable::getGlobalScope() {
-    return scopes.find(nullptr)->second;
+    return scopes.find(0)->second;
 }
 
 Scope& SymbolTable::getCurrentScope() {
     return scopes.find(current_block)->second;
 }
 
-void SymbolTable::pushScope(const Block& block) {
-    if (current_block == &block)
+void SymbolTable::pushScope(Block& block) {
+    if (block.id == static_cast<BlockId>(-1))
+        block.id = nextBlockId();
+    if (current_block == block.id)
         return;
-    scopes.try_emplace(&block, current_block);
-    current_block = &block;
+    scopes.try_emplace(block.id, current_block);
+    current_block = block.id;
 }
 
 void SymbolTable::popScope(const Block& block) {
-    if (current_block == &block)
+    if (current_block == block.id)
         current_block = scopes.find(current_block)->second.parent;
+}
+
+BlockId SymbolTable::nextBlockId() {
+    return next_block_id++;
 }
 
 void SymbolTable::ensureVarExists(const ModifiablePrimary& mp) const {

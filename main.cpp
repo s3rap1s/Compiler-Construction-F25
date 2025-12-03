@@ -158,7 +158,7 @@ int main(int argc, const char** argv) {
         logErrorLn("Failed to open {} for writing", filename);
         return EXIT_FAILURE;
     }
-    std::expected<void, CodegenError> gen_result = generate_code(*ast, *symbol_table, output_file);
+    std::expected<void, CodegenError> gen_result = generate_code(*ast, *symbol_table, output_file, entry_point);
     if (!gen_result) {
         handleCodegenError(gen_result.error(), filename, program_text);
         return EXIT_FAILURE;

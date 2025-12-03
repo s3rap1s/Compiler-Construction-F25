@@ -509,11 +509,11 @@ class Parser {
                 // assertSeparator should be first to not skip it by mistake in other functions
                 if (assertSeparator() || assertKeyword<SyntaxPart::OpenParenthesis>()) {
                     BIND(call, parseRoutineCall({id->span, std::move(id->payload.name)}));
-                    block.emplace_back(std::move(call));
+                    block.statements.emplace_back(std::move(call));
                 } else if (auto op =
                                assertKeywords<SyntaxPart::Assignment, SyntaxPart::Dot, SyntaxPart::OpenBracket>()) {
                     BIND(assignment, parseAssignment({id->span, std::move(id->payload.name)}));
-                    block.emplace_back(std::move(assignment));
+                    block.statements.emplace_back(std::move(assignment));
                 } else {
                     return makeError(getLastSpan(),
                                      KeywordsExpected{{SyntaxPart::OpenParenthesis,
@@ -531,37 +531,37 @@ class Parser {
                 switch (keyword->payload) {
                 case SyntaxPart::Var: {
                     BIND(var_declaration, parseVariableDeclaration());
-                    block.emplace_back(std::move(var_declaration));
+                    block.statements.emplace_back(std::move(var_declaration));
                     break;
                 }
                 case SyntaxPart::Type: {
                     BIND(type_declaration, parseTypeDeclaration());
-                    block.emplace_back(std::move(type_declaration));
+                    block.statements.emplace_back(std::move(type_declaration));
                     break;
                 }
                 case SyntaxPart::While: {
                     BIND(while_loop, parseWhileLoop());
-                    block.emplace_back(std::move(while_loop));
+                    block.statements.emplace_back(std::move(while_loop));
                     break;
                 }
                 case SyntaxPart::For: {
                     BIND(for_loop, parseForLoop());
-                    block.emplace_back(std::move(for_loop));
+                    block.statements.emplace_back(std::move(for_loop));
                     break;
                 }
                 case SyntaxPart::If: {
                     BIND(if_statement, parseIfStatement());
-                    block.emplace_back(std::move(if_statement));
+                    block.statements.emplace_back(std::move(if_statement));
                     break;
                 }
                 case SyntaxPart::Print: {
                     BIND(print, parsePrintStatement());
-                    block.emplace_back(std::move(print));
+                    block.statements.emplace_back(std::move(print));
                     break;
                 }
                 case SyntaxPart::Return: {
                     BIND(return_statement, parseReturnStatement());
-                    block.emplace_back(std::move(return_statement));
+                    block.statements.emplace_back(std::move(return_statement));
                     break;
                 }
                 default:

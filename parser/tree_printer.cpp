@@ -388,7 +388,7 @@ class TreePrinter {
 
     // Statements and Block
     void print(const parser::Block& block) {
-        for (const parser::Statement& element : block) {
+        for (const parser::Statement& element : block.statements) {
             print(element);
             newline();
         }

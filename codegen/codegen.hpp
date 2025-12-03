@@ -6,10 +6,13 @@
 
 #include <expected>
 #include <iosfwd>
+#include <string_view>
 
 namespace codegen {
 
-std::expected<void, CodegenError>
-generate_code(const parser::Program& ast, const analyzer::SymbolTable& symbolTable, std::ostream& out);
+std::expected<void, CodegenError> generate_code(const parser::Program& ast,
+                                                const analyzer::SymbolTable& symbolTable,
+                                                std::ostream& out,
+                                                std::string_view entry_point);
 
 } // namespace codegen

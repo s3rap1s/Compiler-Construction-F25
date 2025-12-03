@@ -34,11 +34,11 @@ struct RoutineInfo {
 };
 
 struct Scope {
-    const Block* parent;
+    BlockId parent;
     std::unordered_map<std::string, VarInfo> variables;
     std::unordered_map<std::string, TypeId> types;
 
-    explicit Scope(const Block* parent) : parent{parent} {}
+    explicit Scope(BlockId parent) : parent{parent} {}
 };
 
 /* ============
@@ -78,21 +78,22 @@ struct SymbolTable {
     std::unordered_map<std::string, RoutineInfo> routines;
     std::unordered_set<std::string> for_loop_variables;
 
-    std::unordered_map<const parser::Block*, Scope> scopes; // initialize with global scope
-    const parser::Block* current_block = nullptr;
+    std::unordered_map<parser::BlockId, Scope> scopes; // initialize with global scope
+    parser::BlockId current_block = 0;
+    parser::BlockId next_block_id = 1;
 
     template <bool Const>
     struct ScopeIterator {
-        MaybeConst<Const, std::unordered_map<const Block*, Scope>>* scopes;
-        const Block* current_block;
+        MaybeConst<Const, std::unordered_map<BlockId, Scope>>* scopes;
+        BlockId current_block;
 
         MaybeConst<Const, Scope>& operator*() const {
             return scopes->find(current_block)->second;
         }
 
         ScopeIterator& operator++() {
-            const Block* parent = (**this).parent;
-            if (current_block == nullptr && parent == nullptr)
+            BlockId parent = (**this).parent;
+            if (current_block == 0 && parent == 0)
                 scopes = nullptr;
             else
                 current_block = parent;
@@ -124,12 +125,12 @@ struct SymbolTable {
     static constexpr TypeId BooleanTypeId = 2;
 
     SymbolTable() {
-        scopes.emplace(nullptr, Scope{nullptr});
+        scopes.emplace(0, Scope{0}); // create a global scope
     }
 
     std::unordered_map<std::string, RoutineInfo>& getRoutines();
     const std::unordered_map<std::string, RoutineInfo>& getRoutines() const;
-    std::unordered_map<const Block*, Scope>& getScopes();
+    std::unordered_map<BlockId, Scope>& getScopes();
     std::unordered_set<std::string>& getForLoopVariables();
 
     ScopesView<false> getScopesView();
@@ -138,8 +139,9 @@ struct SymbolTable {
     Scope& getGlobalScope();
     Scope& getCurrentScope();
 
-    void pushScope(const Block& block);
+    void pushScope(Block& block);
     void popScope(const Block& block);
+    BlockId nextBlockId();
 
     void ensureVarExists(const ModifiablePrimary& mp) const;
     void ensureTypeExists(const Identifier& type_name) const;

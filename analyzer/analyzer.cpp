@@ -275,7 +275,7 @@ class SemanticAnalyzer {
 
     void checkBlock(Block& block) {
         table.pushScope(block);
-        for (Statement& element : block)
+        for (Statement& element : block.statements)
             checkStatement(element);
         table.popScope(block);
     }
@@ -388,7 +388,7 @@ class SemanticAnalyzer {
 
         if (auto* expr = std::get_if<Expression>(&*routine.body)) {
             Block block;
-            block.emplace_back(ReturnStatement{.return_span = routine.name.span, .value = std::move(*expr)});
+            block.statements.emplace_back(ReturnStatement{.return_span = routine.name.span, .value = std::move(*expr)});
             *routine.body = std::move(block);
         }
 
@@ -410,15 +410,15 @@ class SemanticAnalyzer {
         table.popScope(body);
 
         bool last_return = false;
-        if (!body.empty())
-            last_return = std::holds_alternative<ReturnStatement>(body.back());
+        if (!body.statements.empty())
+            last_return = std::holds_alternative<ReturnStatement>(body.statements.back());
         if (routine.return_type && !last_return)
             throw SemanticError{"Non-void function must have return as the last statement", routine.name.span};
         return last_return;
     }
 
     void checkReturnType(RoutineDeclaration& routine, Block& body) {
-        for (Statement& statement : body) {
+        for (Statement& statement : body.statements) {
             std::visit(overloaded{
                            [&](ReturnStatement& return_stmt) {
                                if (!return_stmt.value) {
@@ -450,7 +450,7 @@ class SemanticAnalyzer {
 
     void
     deduceReturnType(RoutineDeclaration& routine, Block& body, DeducingReturnTypeState& state) { // NOLINT(*complexity)
-        for (Statement& statement : body) {
+        for (Statement& statement : body.statements) {
             std::visit(
                 overloaded{
                     [&](ReturnStatement& return_stmt) {
@@ -502,19 +502,19 @@ class SemanticAnalyzer {
     }
 
     bool optimizeBlock(Block& block) {
-        auto block_usage_it = table.getScopes().find(&block);
+        auto block_usage_it = table.getScopes().find(block.id);
         Block optimized;
-        for (bool found_return = false; Statement& statement : block) {
+        for (bool found_return = false; Statement& statement : block.statements) {
             if (found_return)
                 break;
             // optimize out?
             if (!optimizeStatement(statement, block_usage_it->second))
-                optimized.emplace_back(std::move(statement));
+                optimized.statements.emplace_back(std::move(statement));
             if (std::holds_alternative<ReturnStatement>(statement))
                 found_return = true;
         }
         block = std::move(optimized);
-        return block.empty();
+        return block.statements.empty();
     }
 
     bool optimizeStatement(Statement& statement, const Scope& scope) {

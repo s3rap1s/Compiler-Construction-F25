@@ -237,7 +237,12 @@ using Statement = std::variant<AssignmentStatement,
                                VariableDeclaration,
                                TypeDeclaration>;
 
-using Block = std::vector<Statement>;
+using BlockId = std::size_t;
+
+struct Block {
+    std::vector<Statement> statements;
+    BlockId id = -1;
+};
 
 struct AssignmentStatement {
     ModifiablePrimary target;
