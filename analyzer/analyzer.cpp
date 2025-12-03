@@ -381,14 +381,20 @@ class SemanticAnalyzer {
             param.resolved_type = checkType(param.type);
         if (routine.return_type)
             routine.resolved_return_type = checkType(*routine.return_type);
-        if (!routine.body && !routine.return_type)
+        else if (!routine.body && !routine.return_type)
             routine.resolved_return_type = std::nullopt;
     }
 
-    bool checkRoutineDefinition(RoutineDeclaration& routine) {
-        if (!routine.body)
-            return false;
+    void checkRoutineSignatureMatchPrevious(RoutineDeclaration& routine) {
+        auto it = table.getRoutines().find(routine.name.text);
+        if (!std::ranges::equal(
+                it->second.parameters, routine.parameters, {}, {}, &ParameterDeclaration::resolved_type))
+            throw SemanticError{"Routine declarations differ in parameters", routine.name.span};
+        if (it->second.return_type != routine.resolved_return_type)
+            throw SemanticError{"Routine declarations differ in return type", routine.name.span};
+    }
 
+    bool checkRoutineDefinition(RoutineDeclaration& routine) {
         if (auto* expr = std::get_if<Expression>(&*routine.body)) {
             Block block;
             block.statements.emplace_back(ReturnStatement{.return_span = routine.name.span, .value = std::move(*expr)});
@@ -591,15 +597,8 @@ class SemanticAnalyzer {
                            },
                            [this](RoutineDeclaration& routine) {
                                auto it = table.getRoutines().find(routine.name.text);
-                               if (it != table.getRoutines().end()) {
-                                   if (it->second.defined && routine.body)
-                                       throw SemanticError{"Duplicate routine definition: " + routine.name.text,
-                                                           routine.name.span};
-                                   checkRoutineDeclaration(routine);
-                                   it->second.last_return = checkRoutineDefinition(routine);
-                                   if (routine.body)
-                                       it->second.defined = true;
-                               } else {
+                               if (it == table.getRoutines().end()) {
+                                   // first declaration
                                    checkRoutineDeclaration(routine);
                                    bool is_defined = routine.body.has_value();
                                    RoutineInfo info{.parameters = {},
@@ -615,6 +614,16 @@ class SemanticAnalyzer {
                                        it->second.last_return = last_return;
                                        it->second.return_type = routine.resolved_return_type;
                                    }
+                               } else {
+                                   if (it->second.defined && routine.body)
+                                       throw SemanticError{"Duplicate routine definition: " + routine.name.text,
+                                                           routine.name.span};
+                                   checkRoutineDeclaration(routine);
+                                   if (routine.body) {
+                                       it->second.last_return = checkRoutineDefinition(routine);
+                                       it->second.defined = true;
+                                   }
+                                   checkRoutineSignatureMatchPrevious(routine);
                                }
                            },
                        },

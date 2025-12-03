@@ -9,10 +9,7 @@ type Container is record
     var points: Points
 end
 
-routine sideff(ps:Points) is
-    ps[1].x := 10
-    print "Size:", ps.size
-end
+routine sideff(ps:Points)
 
 var c: Container
 
@@ -29,4 +26,9 @@ routine main() is
     for p in c.points reverse loop
         print "Point:", p.x, p.y
     end
+end
+
+routine sideff(ps:Points) is
+    ps[1].x := 10
+    print "Size:", ps.size
 end
