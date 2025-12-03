@@ -595,9 +595,10 @@ class SemanticAnalyzer {
                                    if (it->second.defined && routine.body)
                                        throw SemanticError{"Duplicate routine definition: " + routine.name.text,
                                                            routine.name.span};
+                                   checkRoutineDeclaration(routine);
+                                   it->second.last_return = checkRoutineDefinition(routine);
                                    if (routine.body)
                                        it->second.defined = true;
-                                   it->second.last_return = checkRoutineDefinition(routine);
                                } else {
                                    checkRoutineDeclaration(routine);
                                    bool is_defined = routine.body.has_value();
