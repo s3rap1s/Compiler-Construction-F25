@@ -1,0 +1,85 @@
+routine greet() is
+    print "Hello!"
+end
+
+
+routine add(a : integer, b : integer) : integer is
+    return a + b
+end
+
+routine sum(arr : array[] integer) : integer is
+    var sum is 0
+    for elem in arr loop
+        sum := sum + elem
+    end
+    return sum
+end  
+
+routine forwardExample() : integer
+
+type IntArray is array [5] integer
+
+routine main()  is 
+    var intX : integer is 10
+    var intY : real is 3.14
+    var flag : boolean is true
+    var z is 2.5
+    print flag
+
+
+    if intX > 0 then
+        print "x положительное"
+    else
+        print "x не положительное"
+    end
+
+    type MyInt is integer
+    var a : MyInt is 5
+    print "MyInt a = ", a
+
+    var arr : IntArray
+    arr[1] := 10
+    arr[2] := 20
+    arr[3] := 30
+    print "arr[1] = ", arr[1], "arr[4] = ", arr[4]
+
+    var shadow : integer is 100
+    if true then
+        var shadow : integer is 200
+        print shadow 
+    end
+    print shadow
+
+    var i : integer is 1
+    while i <= 5 loop
+        print "i in loop = ", i
+        i := i + 1
+    end
+
+    for j in 1..5 loop
+        print "j in loop = ", j
+    end
+
+
+    for k in 5..1 reverse loop
+        print "k in reversed loop = ", k
+    end
+
+    for elem in arr loop
+        print "elem in arr loop = ", elem
+    end
+
+    greet()
+
+    var sumOf2 : integer is add(5, 3)
+    print "addition result = ", sumOf2
+
+    print "result of sum function = ", sum(arr)
+
+    var result : integer is forwardExample()
+    print "resutl of forward declaration", result
+end
+
+routine forwardExample() : integer is
+    return 42
+end
