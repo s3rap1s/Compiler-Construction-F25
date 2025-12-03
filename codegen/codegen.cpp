@@ -706,15 +706,11 @@ struct CodeGenerator {
         BasicBlock* bodyBlock = BasicBlock::Create(context, "for.body", function);
         BasicBlock* endBlock = BasicBlock::Create(context, "for.end", function);
 
-        auto oldNamedValues = namedValues;
-
         if (std::holds_alternative<Expression>(forStmt.range)) {
             generateArrayForLoop(forStmt, condBlock, bodyBlock, endBlock, function);
         } else {
             generateRangeForLoop(forStmt, condBlock, bodyBlock, endBlock, function);
         }
-
-        namedValues = std::move(oldNamedValues);
 
         builder.SetInsertPoint(endBlock);
     }
@@ -916,9 +912,11 @@ struct CodeGenerator {
     }
 
     void generateBlock(const Block& block) {
+        auto oldNamedValues = namedValues;
         for (const Statement& element : block.statements) {
             generateStatement(element);
         }
+        namedValues = std::move(oldNamedValues);
     }
 
     Function* generateRoutineDeclaration(const parser::RoutineDeclaration& declaration) {
@@ -954,8 +952,6 @@ struct CodeGenerator {
             }
         }
 
-        auto oldNamedValues = namedValues;
-
         for (auto& arg : function->args()) {
             TypeId paramType = declaration.parameters[arg.getArgNo()].resolved_type;
 
@@ -990,8 +986,6 @@ struct CodeGenerator {
         if (verifyFunction(*function, &error_stream)) {
             throw CodegenError{"Function verification failed: " + verification_error, declaration.name.span};
         }
-
-        namedValues = std::move(oldNamedValues);
     }
 
     void initializeGlobalVariables() { // NOLINT(*complexity*)
