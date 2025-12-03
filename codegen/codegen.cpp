@@ -19,7 +19,9 @@
 #include <llvm/IR/Value.h>
 #include <llvm/IR/Verifier.h>
 #include <llvm/Support/Casting.h>
+#include <llvm/Support/TargetSelect.h>
 #include <llvm/Support/raw_os_ostream.h>
+#include <llvm/TargetParser/Host.h>
 
 #include <cassert>
 #include <cstddef>
@@ -944,7 +946,7 @@ struct CodeGenerator {
         BasicBlock* block = BasicBlock::Create(context, "entry", function);
         builder.SetInsertPoint(block);
 
-        if (declaration.name.text == "main") {
+        if (declaration.name.text == entry_point) {
             Function* initFunc = module.getFunction("__init_globals");
             if (initFunc) {
                 builder.CreateCall(initFunc);
@@ -1112,12 +1114,13 @@ struct CodeGenerator {
                 }
             }
         }
-        if (!module.getFunction("main")) {
-            FunctionType* mainType = FunctionType::get(builder.getInt32Ty(), false);
-            Function* mainFunc = Function::Create(mainType, Function::ExternalLinkage, "main", &module);
 
-            BasicBlock* mainBlock = BasicBlock::Create(context, "entry", mainFunc);
-            builder.SetInsertPoint(mainBlock);
+        if (!module.getFunction(entry_point)) {
+            FunctionType* entryType = FunctionType::get(builder.getInt32Ty(), false);
+            Function* entryFunc = Function::Create(entryType, Function::ExternalLinkage, entry_point, &module);
+
+            BasicBlock* entryBlock = BasicBlock::Create(context, "entry", entryFunc);
+            builder.SetInsertPoint(entryBlock);
 
             Function* initFunc = module.getFunction("__init_globals");
             if (initFunc) {
@@ -1130,7 +1133,11 @@ struct CodeGenerator {
 
   public:
     explicit CodeGenerator(const Program& ast, const SymbolTable& symbolTable, std::string_view entry_point)
-        : symbolTable{symbolTable}, program{ast}, entry_point{entry_point} {}
+        : symbolTable{symbolTable}, program{ast}, entry_point{entry_point} {
+        std::string targetTripleStr = llvm::sys::getDefaultTargetTriple();
+        llvm::Triple targetTriple(targetTripleStr);
+        module.setTargetTriple(targetTriple);
+    }
 
     std::expected<void, CodegenError> generate(llvm::raw_ostream& out) {
         try {
