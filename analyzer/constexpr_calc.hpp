@@ -20,4 +20,6 @@ using ConstexprValue = std::variant<IntegerValue, RealValue, BooleanValue>;
 
 std::optional<ConstexprValue> computeConstexpr(const parser::Expression& expr);
 
+parser::Expression toExpression(const ConstexprValue& value);
+
 } // namespace analyzer

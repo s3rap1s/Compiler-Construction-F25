@@ -538,6 +538,12 @@ class SemanticAnalyzer {
                         return optimizeBlock(if_stmt.true_branch);
                     return optimizeBlock(if_stmt.true_branch) && optimizeBlock(*if_stmt.false_branch);
                 },
+                [](AssignmentStatement& assignment) {
+                    auto opt = computeConstexpr(assignment.expression);
+                    if (opt)
+                        assignment.expression = toExpression(*opt);
+                    return false;
+                },
                 [](auto& /*statement*/) { return false; },
             },
             statement);

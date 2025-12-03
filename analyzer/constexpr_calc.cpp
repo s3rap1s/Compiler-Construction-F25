@@ -1,5 +1,6 @@
 #include "constexpr_calc.hpp"
 
+#include "analyzer/symbol_table.hpp"
 #include "parser/ast.hpp"
 #include "utils.hpp"
 
@@ -204,6 +205,42 @@ std::optional<ConstexprValue> computeConstexpr(const Expression& expr) {
         result = expressionReducer(result, operation, computed);
     }
     return result;
+}
+
+parser::Expression toExpression(const ConstexprValue& value) {
+    return std::visit(
+        overloaded{
+            [&](IntegerValue i) {
+                Expression expression{
+                    .first = Relation{.first =
+                                          NumberExpression{
+                                              Summand{Primary{IntegerLiteral{.span{}, .value = i.value}}, {}}, {}},
+                                      .second{}},
+                    .rest = {}};
+                expression.type = SymbolTable::IntegerTypeId;
+                return expression;
+            },
+            [&](RealValue r) {
+                Expression expression{
+                    .first =
+                        Relation{.first =
+                                     NumberExpression{Summand{Primary{RealLiteral{.span{}, .value = r.value}}, {}}, {}},
+                                 .second{}},
+                    .rest = {}};
+                expression.type = SymbolTable::RealTypeId;
+                return expression;
+            },
+            [&](BooleanValue b) {
+                Expression expression{
+                    .first = Relation{.first =
+                                          NumberExpression{
+                                              Summand{Primary{BooleanLiteral{.span{}, .value = b.value}}, {}}, {}},
+                                      .second{}},
+                    .rest = {}};
+                expression.type = SymbolTable::BooleanTypeId;
+                return expression;
+            }},
+        value);
 }
 
 } // namespace analyzer
