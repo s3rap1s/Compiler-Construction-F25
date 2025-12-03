@@ -195,11 +195,11 @@ class SemanticAnalyzer {
         const TypeInfo& type_info_of_last = table.getTypeInfo(type_id_of_last);
 
         if (!std::holds_alternative<ArrayTypeInfo>(type_info_of_last.definition))
-            throw SemanticError{"Cannot index non-array type", index.bracket_span};
+            throw SemanticError{"Cannot index non-array type", index.open_bracket_span};
 
         checkExpression(index.value);
         if (index.value.type != table.IntegerTypeId)
-            throw SemanticError{"Array index must be of integer type", index.bracket_span};
+            throw SemanticError{"Array index must be of integer type", index.open_bracket_span};
 
         return accessor_type = std::get<ArrayTypeInfo>(type_info_of_last.definition).element_type;
     }
@@ -299,21 +299,24 @@ class SemanticAnalyzer {
                        [this](IfStatement& statement) {
                            checkExpression(statement.condition);
                            checkBlock(statement.true_branch);
-                           if (statement.false_branch) {
+                           if (statement.false_branch)
                                checkBlock(*statement.false_branch);
-                           }
                        },
                        [this](PrintStatement& statement) {
                            for (auto& arg : statement.arguments) {
-                               if (std::holds_alternative<Expression>(arg)) {
-                                   checkExpression(std::get<Expression>(arg));
+                               if (auto* expr = std::get_if<Expression>(&arg)) {
+                                   checkExpression(*expr);
+                                   static constexpr auto allowed_types = {
+                                       SymbolTable::IntegerTypeId, SymbolTable::RealTypeId, SymbolTable::BooleanTypeId};
+                                   if (!std::ranges::contains(allowed_types, expr->type))
+                                       throw SemanticError{"Cannot print type " + getTypeName(expr->type),
+                                                           getSpan(*expr)};
                                }
                            }
                        },
                        [this](ReturnStatement& statement) {
-                           if (statement.value) {
+                           if (statement.value)
                                checkExpression(*statement.value);
-                           }
                        },
                        [this](RoutineCall& statement) { checkRoutineCall(statement); },
                    },
@@ -606,8 +609,11 @@ class SemanticAnalyzer {
                                    for (const ParameterDeclaration& param : routine.parameters)
                                        info.parameters.push_back(param.resolved_type);
                                    auto [it, _] = table.getRoutines().emplace(routine.name.text, std::move(info));
-                                   bool last_return = checkRoutineDefinition(routine);
-                                   it->second.last_return = last_return;
+                                   if (routine.body) {
+                                       bool last_return = checkRoutineDefinition(routine);
+                                       it->second.last_return = last_return;
+                                       it->second.return_type = routine.resolved_return_type;
+                                   }
                                }
                            },
                        },

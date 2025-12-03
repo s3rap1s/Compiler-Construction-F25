@@ -39,7 +39,6 @@ using namespace parser;
 using namespace analyzer;
 using namespace llvm;
 
-// NOLINTBEGIN(*recursion*)
 struct CodeGenerator {
   private:
     llvm::LLVMContext context;
@@ -68,7 +67,7 @@ struct CodeGenerator {
     const std::string entry_point;
 
     static bool isRecordType(TypeId typeId, const SymbolTable& symbolTable) {
-        const auto& typeInfo = symbolTable.getTypeInfo(typeId);
+        const TypeInfo& typeInfo = symbolTable.getTypeInfo(typeId);
         return std::holds_alternative<RecordTypeInfo>(typeInfo.definition) ||
                std::holds_alternative<ArrayTypeInfo>(typeInfo.definition);
     }
@@ -402,7 +401,7 @@ struct CodeGenerator {
                     }
                     currentTypeId = elementTypeId;
                 } else {
-                    throw CodegenError{"Indexing non-array type", index.bracket_span};
+                    throw CodegenError{"Indexing non-array type", index.open_bracket_span};
                 }
             } else {
                 const auto& field = std::get<Identifier>(accessor.key);
@@ -483,7 +482,7 @@ struct CodeGenerator {
                     current = builder.CreateGEP(getBaseLLVMType(arrayInfo.element_type), dataPtr, adjIndex, "elemptr");
                     currentTypeId = arrayInfo.element_type;
                 } else {
-                    throw CodegenError{"Indexing non-array type", index.bracket_span};
+                    throw CodegenError{"Indexing non-array type", index.open_bracket_span};
                 }
             } else {
                 const auto& field = std::get<Identifier>(accessor.key);
@@ -879,13 +878,15 @@ struct CodeGenerator {
                 const auto& str = std::get<parser::StringLiteral>(arg);
                 Value* formatStr = builder.CreateGlobalString(str.value);
                 builder.CreateCall(printfFunc, {formatStr});
+                formatStr = builder.CreateGlobalString(" ");
+                builder.CreateCall(printfFunc, {formatStr});
             } else {
                 const auto& expr = std::get<Expression>(arg);
                 Value* value = generateExpression(expr);
 
                 Value* formatStr = nullptr;
                 if (value->getType()->isIntegerTy(32)) { // NOLINT(*magic*)
-                    formatStr = builder.CreateGlobalString("%d ");
+                    formatStr = builder.CreateGlobalString("%ld ");
                 } else if (value->getType()->isDoubleTy()) {
                     formatStr = builder.CreateGlobalString("%f ");
                 } else if (value->getType()->isIntegerTy(1)) {

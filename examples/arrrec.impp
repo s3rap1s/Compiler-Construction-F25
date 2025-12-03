@@ -11,9 +11,7 @@ end
 
 routine sideff(ps:Points) is
     ps[1].x := 10
-    print ps.size
-    print ps[1].x
-    return 1
+    print "Size:", ps.size
 end
 
 var c: Container
@@ -28,7 +26,7 @@ routine main() is
     c.points[2].x := 3
     c.points[2].y := 4
 
-    for p in c.points loop
-        print "Point: ", p.x, p.y
+    for p in c.points reverse loop
+        print "Point:", p.x, p.y
     end
 end

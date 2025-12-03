@@ -4,16 +4,8 @@ end
 
 routine sqr(x : integer) => x * x
 
-routine changeArr(arr : array[] integer) is
-    arr[1] := 20
-    print arr.size
-end
-
 routine main() : integer is
-    var arr : array[2] integer
-    arr[1] := 10
-    print arr[1]
-    changeArr(arr)
-    print arr[1]
+    hw
+    print sqr(4)
     return 0
 end

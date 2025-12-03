@@ -170,7 +170,8 @@ struct Expression {
 };
 
 struct Index {
-    Span bracket_span;
+    Span open_bracket_span;
+    Span close_bracket_span;
     Expression value;
 };
 
@@ -336,5 +337,7 @@ Span getSpan(const NumberExpression& expr);
 Span getSpan(const Summand& summand);
 
 Span getSpan(const Primary& primary);
+
+Span getSpan(const ModifiablePrimary::Accessor& accessor);
 
 } // namespace parser

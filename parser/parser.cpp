@@ -495,8 +495,9 @@ class Parser {
                 mp.accessors.emplace_back(std::in_place_index<1>, field.span, std::move(field.payload.name));
             } else {
                 BIND(index, parseExpression());
-                BIND_VOID(consumeKeyword<SyntaxPart::CloseBracket>());
-                mp.accessors.emplace_back(std::in_place_index<0>, op_keyword->span, std::move(index));
+                BIND(close_bracket, consumeKeyword<SyntaxPart::CloseBracket>());
+                mp.accessors.emplace_back(
+                    std::in_place_index<0>, op_keyword->span, close_bracket.span, std::move(index));
             }
         }
         return mp;

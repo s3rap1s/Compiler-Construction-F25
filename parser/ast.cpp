@@ -43,11 +43,24 @@ Span getSpan(const Primary& primary) {
                               return call.arguments.empty() ? call.routine_name.span
                                                             : call.routine_name.span | getSpan(call.arguments.back());
                           },
-                          [](const ModifiablePrimary& mp) { return mp.variable.span; },
+                          [](const ModifiablePrimary& mp) {
+                              Span span = mp.variable.span;
+                              if (!mp.accessors.empty())
+                                  span = span | getSpan(mp.accessors.back());
+                              return span;
+                          },
                           [](const UnarySign& op) { return op.sign_span | getSpan(*op.operand); },
                           [](const ParenthesizedExpression& par) { return getSpan(*par.expression); },
                       },
                       primary);
+}
+
+Span getSpan(const ModifiablePrimary::Accessor& accessor) {
+    return std::visit(overloaded{
+                          [](const Index& i) { return i.open_bracket_span | i.close_bracket_span; },
+                          [](const Identifier& id) { return id.span; },
+                      },
+                      accessor.key);
 }
 
 } // namespace parser
