@@ -1,11 +1,11 @@
 #pragma once
 
-#include "parser/declarations.hpp"
+#include "parser/ast.hpp"
 
 #include <iostream>
 
 namespace parser {
 
-void print_tree(const Program& program, std::ostream* out = &std::cout);
+void print_tree(const Program& program, std::ostream& out = std::cout);
 
 } // namespace parser

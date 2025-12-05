@@ -8,7 +8,7 @@
 
 namespace lexer {
 
-TokenIterator::TokenIterator(Lexer& lexer, std::optional<Lexer::ResultType>& store) : lexer{&lexer}, store{store} {
+TokenIterator::TokenIterator(Lexer& lexer, std::optional<Lexer::LexingResult>& store) : lexer{&lexer}, store{store} {
     ++*this;
 }
 
@@ -21,11 +21,11 @@ auto TokenIterator::operator->() const -> value_type* {
 }
 
 TokenIterator& TokenIterator::operator++() {
-    std::optional<Lexer::ResultType> resultO = lexer->getNextToken();
+    std::optional<Lexer::LexingResult> resultO = lexer->getNextToken();
     if (!resultO)
         lexer = nullptr;
     else {
-        Lexer::ResultType& result = *resultO;
+        Lexer::LexingResult& result = *resultO;
         if (!result)
             lexer = nullptr;
         store.get() = std::move(result);

@@ -1,5 +1,6 @@
 #include <cstddef>
 #include <cstdlib>
+#include <expected>
 #include <format>
 #include <fstream>
 #include <iostream>
@@ -11,19 +12,25 @@
 #include <utility>
 #include <variant>
 
+#include "analyzer/analyzer.hpp"
+#include "analyzer/semantic_error.hpp"
+#include "analyzer/symbol_table.hpp"
+#include "codegen/codegen.hpp"
+#include "codegen/codegen_error.hpp"
 #include "lexer/lexer.hpp"
 #include "lexer/lexing_error.hpp"
 #include "lexer/token_printer.hpp"
 #include "lexer/tokens.hpp"
+#include "parser/ast.hpp"
 #include "parser/parser.hpp"
 #include "parser/syntax_error.hpp"
-#include "parser/tree_printer.hpp"
-
 
 #include "utils.hpp"
 
 using namespace lexer;
 using namespace parser;
+using namespace analyzer;
+using namespace codegen;
 
 namespace {
 
@@ -60,11 +67,22 @@ std::string representListOfKeywords(std::span<const SyntaxPart> sps) {
     return sps | transform(representSyntaxPart) | join_with(", "sv) | std::ranges::to<std::string>();
 }
 
-void handleSyntaxError(const SyntaxError& error, std::string_view filename, std::string_view program) {
+void printErrorHeader(std::string_view filename, const Span& error_location) {
+    logError("{}:{}:{}: error: ", filename, error_location.line_no, error_location.column_no);
+}
+
+void printErrorSpan(std::string_view program, const Span& error_location) {
     using namespace std::views;
 
-    const Span& error_location = error.span;
-    logError("{}:{}:{}: error: ", filename, error_location.line_no, error_location.column_no);
+    const std::size_t line_start = error_location.begin - (error_location.column_no - 1);
+    const std::size_t error_length = error_location.end - error_location.begin;
+    logErrorLn("    | {:s}",
+               program.substr(line_start) | take_while([](char ch) static { return ch != '\n' && ch != '\r'; }));
+    logErrorLn("    | {:s}^{:s}", repeat(' ', error_location.column_no - 1), repeat('~', error_length - 1));
+}
+
+void handleSyntaxError(const SyntaxError& error, std::string_view filename, std::string_view program) {
+    printErrorHeader(filename, error.span);
     std::visit(
         overloaded{
             [](const LexingError& e) { handleLexingError(e); },
@@ -86,12 +104,19 @@ void handleSyntaxError(const SyntaxError& error, std::string_view filename, std:
             },
         },
         error.payload);
+    printErrorSpan(program, error.span);
+}
 
-    const std::size_t line_start = error_location.begin - (error_location.column_no - 1);
-    const std::size_t error_length = error_location.end - error_location.begin;
-    logErrorLn("    | {:s}",
-               program.substr(line_start) | take_while([](char ch) static { return ch != '\n' && ch != '\r'; }));
-    logErrorLn("    | {:s}^{:s}", repeat(' ', error_location.column_no - 1), repeat('~', error_length - 1));
+void handleSemanticError(const SemanticError& error, std::string_view filename, std::string_view program) {
+    printErrorHeader(filename, error.span);
+    logErrorLn("{}", error.what);
+    printErrorSpan(program, error.span);
+}
+
+void handleCodegenError(const CodegenError& error, std::string_view filename, std::string_view program) {
+    printErrorHeader(filename, error.span);
+    logErrorLn("{}", error.what);
+    printErrorSpan(program, error.span);
 }
 
 } // namespace
@@ -104,6 +129,7 @@ int main(int argc, const char** argv) {
 
     // read entire file into string
     std::string_view filename = argv[1];
+    std::string_view entry_point = (argc < 3 ? "main" : argv[2]);
     std::fstream file{argv[1], file.in | file.ate};
     if (!file) {
         logErrorLn("Failed to open the file");
@@ -113,13 +139,31 @@ int main(int argc, const char** argv) {
 
     Lexer lexer{std::move(program_text)};
     std::expected<Program, SyntaxError> ast = parse(lexer);
+    program_text = std::move(lexer).getProgramText();
     if (!ast) {
-        program_text = std::move(lexer).getProgramText();
         handleSyntaxError(ast.error(), filename, program_text);
         return EXIT_FAILURE;
     }
 
-    print_tree(*ast);
-    
+    std::expected<SymbolTable, SemanticError> symbol_table = analyze(*ast, entry_point);
+    if (!symbol_table) {
+        handleSemanticError(symbol_table.error(), filename, program_text);
+        return EXIT_FAILURE;
+    }
+    // print_tree(*ast);
+
+    std::string output_filename = "output.ll";
+    std::fstream output_file{output_filename, output_file.out};
+    if (!output_file) {
+        logErrorLn("Failed to open {} for writing", filename);
+        return EXIT_FAILURE;
+    }
+    std::expected<void, CodegenError> gen_result = generate_code(*ast, *symbol_table, output_file, entry_point);
+    if (!gen_result) {
+        handleCodegenError(gen_result.error(), filename, program_text);
+        return EXIT_FAILURE;
+    }
+    logErrorLn("Output saved to {}", output_filename);
+
     return EXIT_SUCCESS;
 }

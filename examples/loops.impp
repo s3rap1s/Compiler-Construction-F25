@@ -1,18 +1,24 @@
-routine main() is
-    var arr: array[3] integer
+routine sum(arr : array[] integer) : integer
+
+routine main() : integer is
+    var arr : array[3] integer
     arr[1] := 10
     arr[2] := 20
     arr[3] := 30
-
     for i in 1..3 loop
         print arr[i]
     end
-
+    print sum(arr), "!!!"
     for i in 1..3 reverse loop
         print arr[i]
     end
-
-    for i in 5..1 loop
-        print i
-    end
+    return 0
 end
+
+routine sum(arr : array[] integer) : integer is
+    var sum is 0
+    for elem in arr loop
+        sum := sum + elem
+    end
+    return sum
+end  

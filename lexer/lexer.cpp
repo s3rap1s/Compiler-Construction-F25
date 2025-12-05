@@ -97,7 +97,7 @@ void Lexer::advance() {
     ++char_pos;
 }
 
-auto Lexer::getNextToken() -> std::optional<ResultType> { // NOLINT(*complexity*)
+auto Lexer::getNextToken() -> std::optional<LexingResult> { // NOLINT(*complexity*)
     // NOLINTBEGIN(*bool-conversion*)
     if (char_pos == file.size())
         return std::nullopt;
@@ -168,9 +168,14 @@ auto Lexer::getNextToken() -> std::optional<ResultType> { // NOLINT(*complexity*
                 break;
             }
             current_state = State::Start;
+            // "10." is invalid real literal
             if (buffer.back() == '.') {
                 --char_pos;
                 buffer.pop_back();
+                if (long long value = 0;
+                    std::from_chars(buffer.data(), buffer.data() + buffer.size(), value).ec == std::errc{})
+                    return makeToken(token_start, IntegerLiteral{value});
+                return std::unexpected{IntegerLiteralError{buffer}};
             }
             if (double value = 0;
                 std::from_chars(buffer.data(), buffer.data() + buffer.size(), value).ec == std::errc{})

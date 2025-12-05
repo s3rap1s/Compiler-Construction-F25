@@ -16,10 +16,10 @@ class TokenIterator {
 
   private:
     Lexer* lexer; // nullptr if the end of token stream was reached
-    std::reference_wrapper<std::optional<Lexer::ResultType>> store;
+    std::reference_wrapper<std::optional<Lexer::LexingResult>> store;
 
   public:
-    TokenIterator(Lexer& lexer, std::optional<Lexer::ResultType>& store);
+    TokenIterator(Lexer& lexer, std::optional<Lexer::LexingResult>& store);
     TokenIterator(const TokenIterator&) = delete;
     TokenIterator(TokenIterator&&) = default;
 

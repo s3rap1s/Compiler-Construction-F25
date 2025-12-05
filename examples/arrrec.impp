@@ -3,21 +3,32 @@ type Point is record
     var y: integer
 end
 
-type Points is array[2] Point
+type Points is array[1+1] Point
 
 type Container is record
     var points: Points
 end
 
+routine sideff(ps:Points)
+
+var c: Container
+
 routine main() is
-    var c: Container
-    c.points[1].x := 1
+    c.points[1].x := 20
+    print c.points[1].x
+    sideff(c.points)
+    print c.points[1].x
+
     c.points[1].y := 2
     c.points[2].x := 3
     c.points[2].y := 4
-    
-    print c.points[1].x
-    print c.points[1].y
-    print c.points[2].x
-    print c.points[2].y
+
+    for p in c.points reverse loop
+        print "Point:", p.x, p.y
+    end
+end
+
+routine sideff(ps:Points) is
+    ps[1].x := 10
+    print "Size:", ps.size
 end

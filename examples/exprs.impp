@@ -13,13 +13,25 @@ routine main() is
     var expr6: boolean is (a = 10) xor (b /= 3)
     var expr7: real is -c + 2.0 * a
     var expr8: boolean is a >= 5 and b < 4 or e
+    var expr9: boolean is a
+    var expr10: boolean is 0
+    var expr11: real is a
+    var expr12: real is d
+    var expr13: integer is c
+    var expr14: integer is e
 
-    print expr1
-    print expr2
-    print expr3
-    print expr4
-    print expr5
-    print expr6
-    print expr7
-    print expr8
+    print "expr1: ", expr1
+    print "expr2: ", expr2
+    print "expr3: ", expr3
+    print "expr4: ", expr4
+    print "expr5: ", expr5
+    print "expr6: ", expr6
+    print "expr7: ", expr7
+    print "expr8: ", expr8
+    print "expr9: ", expr9
+    print "expr10: ", expr10
+    print "expr11: ", expr11
+    print "expr12: ", expr12
+    print "expr13: ", expr13
+    print "expr14: ", expr14
 end

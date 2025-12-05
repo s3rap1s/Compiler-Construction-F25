@@ -1,3 +1,11 @@
-routine main() is
+routine hw() is
     print "Hello, World!", 123
+end
+
+routine sqr(x : integer) => x * x
+
+routine main() : integer is
+    hw
+    print sqr(4)
+    return 0
 end

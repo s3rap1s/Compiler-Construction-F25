@@ -90,7 +90,7 @@ std::string representLiteral(const Literal& literal) {
 
 std::string representToken(const Token& token) {
     constexpr auto matcher = overloaded{
-        [](const Identifier& id) { return std::format("identifier \"{}\"", id.name); },
+        [](const Identifier& id) { return std::format("identifier \'{}\'", id.name); },
         [](const SyntaxPart& sp) { return representSyntaxPart(sp); },
         [](const Literal& lit) { return representLiteral(lit); },
     };
